@@ -110,3 +110,32 @@ digest of every actual download. The manifest scopes `CLOSED` to this Gooo
 semantic graph authority, leaves external utility `UNKNOWN`, and makes no
 global core-authority claim. The release workflow itself performs no local
 tests, builds, or OpenTofu execution.
+
+## v0.2.0 generated OpenTofu service project
+
+v0.2.0 uses `examples/intent/main.gooo` as the only human-authored semantic
+source for a small `checkout-api` project. It declares two infrastructure
+resources, one service capability, two service endpoints, and the bindings
+that connect them. The twelve source activities are checked against the
+released Gooo semantic graph and the fixed six-step user path.
+
+GitHub Actions generates `main.tf.json`, `service-contract.json`, and
+`relation-report.md`, then records `dossier.md` and `contract-receipt.json`.
+The providerless artifact has three OpenTofu resources and zero modules. The
+pinned OpenTofu 1.12.6 `validate -json` result is consumed by an independent
+standard-library consumer that recomputes the source, graph, generated files,
+validation, and relation-evidence digest chain.
+
+The six examples are exactly two NORMAL, two UNKNOWN, and two REFUTED. Missing
+service bindings remain UNKNOWN with a cause path and the six required fields:
+`stage`, `step`, `reason`, `unknown_class`, `next_operation`, and
+`blocked_by`. Contradictory resource/endpoint mappings are REFUTED, with
+precedence `REFUTED > UNKNOWN > CLOSED`.
+
+The released scope is `GENERATED_OPENTOFU_SERVICE_PROJECT_ONLY`. It leaves
+external utility and global core authority explicitly unclosed. No handwritten
+Go semantic authority exists; the repository inventory records zero Go files.
+No exact before/after observation exists, so improvement remains UNKNOWN.
+Release-time validation consumes the successful main CI artifact, executes no
+local tests, builds, or OpenTofu commands, and preserves the v0.1.3–v0.1.9
+history and failed-trigger evidence.

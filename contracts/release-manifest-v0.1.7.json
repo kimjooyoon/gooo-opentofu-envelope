@@ -2,14 +2,9 @@
   "schema": "gooo/opentofu-envelope/release-manifest/v1",
   "version": 1,
   "release": {
-    "tag": "v0.1.6",
-    "release_present": false,
-    "failed_trigger_counterexample": true,
-    "tag_object_sha": "cbe70a19dbf547868f907cb51954b66a0f774e66",
-    "target_commit_sha": "744e32655c6a6d1adf8c31d334814b555bce1a69",
-    "failed_trigger_run_ids": [33431118426],
+    "tag": "v0.1.7",
     "asset_count_before": 0,
-    "asset_count_after": 0,
+    "asset_count_after": 4,
     "predecessor_chain": [
       {
         "tag": "v0.1.3",
@@ -37,19 +32,29 @@
         "tag_object_sha": "1140c6701c65275bdf6e2cd7e801c9f8191b83ed",
         "target_commit_sha": "bdee16c2506c0efdb3c5562f0d4126a293afc26f",
         "failed_trigger_run_ids": [33430206446, 33430284845, 33430367725, 33430500643]
+      },
+      {
+        "tag": "v0.1.6",
+        "release_id": null,
+        "release_present": false,
+        "asset_count": 0,
+        "failed_trigger_counterexample": true,
+        "tag_object_sha": "cbe70a19dbf547868f907cb51954b66a0f774e66",
+        "target_commit_sha": "744e32655c6a6d1adf8c31d334814b555bce1a69",
+        "failed_trigger_run_ids": [33431118426]
       }
     ]
   },
   "required_assets": [
-    "evidence-v0.1.6.tar.gz",
-    "manifest-v0.1.6.json",
+    "evidence-v0.1.7.tar.gz",
+    "manifest-v0.1.7.json",
     "SHA256SUMS",
-    "source-v0.1.6.tar.gz"
+    "source-v0.1.7.tar.gz"
   ],
   "workflow": {
-    "path": ".github/workflows/release-v0.1.6.yml",
+    "path": ".github/workflows/release-v0.1.7.yml",
     "trigger_event": "push",
-    "trigger_tags": ["v0.1.6"],
+    "trigger_tags": ["v0.1.7"],
     "workflow_dispatch": false
   },
   "source_identity": {
@@ -79,9 +84,9 @@
   },
   "checksum_contract": {
     "sha256sums_lists": [
-      "evidence-v0.1.6.tar.gz",
-      "manifest-v0.1.6.json",
-      "source-v0.1.6.tar.gz"
+      "evidence-v0.1.7.tar.gz",
+      "manifest-v0.1.7.json",
+      "source-v0.1.7.tar.gz"
     ],
     "sha256sums_excludes_self": true,
     "server_asset_digest_and_download_digest_must_match": true

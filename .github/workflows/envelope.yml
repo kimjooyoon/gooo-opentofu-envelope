@@ -1,0 +1,305 @@
+name: Gooo OpenTofu Envelope
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - 'feat/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  envelope:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SUBJECT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      WORK_DIR: /tmp/gooo-opentofu-envelope
+      PUBLISH_DIR: /tmp/gooo-opentofu-envelope-publish
+      EVIDENCE_DIR: /tmp/gooo-opentofu-envelope-evidence
+
+    steps:
+      - name: Checkout submitted revision
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Pin Go 1.27 toolchain for evidence only
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.27.x'
+          cache: false
+
+      - name: Acquire immutable Gooo, OpenTofu, and specification inputs
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$WORK_DIR" "$PUBLISH_DIR" "$EVIDENCE_DIR"
+          mkdir -p "$WORK_DIR/gooo/bin" "$WORK_DIR/tofu/bin" "$PUBLISH_DIR" "$EVIDENCE_DIR"
+          lock=contracts/release-lock-v1.json
+          jq -e '
+            .schema=="gooo/opentofu-envelope/release-lock/v1" and
+            .authority.repository_writes==0 and
+            .authority.local_test_executions==0 and
+            .authority.local_build_executions==0 and
+            .authority.local_formatter_executions==0 and
+            .authority.opentofu_init_executions==0 and
+            .authority.opentofu_plan_executions==1 and
+            .authority.opentofu_validate_executions==1 and
+            .authority.opentofu_apply_executions==0 and
+            .authority.opentofu_destroy_executions==0 and
+            .authority.opentofu_import_executions==0 and
+            .authority.opentofu_state_mutations==0 and
+            .authority.opentofu_test_executions==0 and
+            .authority.opentofu_provider_accesses==0 and
+            .authority.opentofu_cloud_accesses==0 and
+            .authority.opentofu_runtime_network_access_claimed==false and
+            .cache_contract.installation_binary_cache_state=="DISABLED" and
+            .cache_contract.go_build_cache_state=="DISABLED" and
+            .cache_contract.prior_test_evidence_reuse_state=="NOT_REUSED" and
+            .cache_contract.runner_persistence=="EPHEMERAL"
+          ' "$lock" >/dev/null
+
+          verify_tag_commit() {
+            local repository=$1 tag=$2 expected=$3
+            local resolved
+            resolved=$(git ls-remote "https://github.com/$repository.git" "refs/tags/$tag^{}" | awk 'NR==1{print $1}')
+            if [ -z "$resolved" ]; then
+              resolved=$(git ls-remote "https://github.com/$repository.git" "refs/tags/$tag" | awk 'NR==1{print $1}')
+            fi
+            test "$resolved" = "$expected"
+          }
+
+          verify_release() {
+            local repository=$1 tag=$2 release_id=$3 target=$4 prerelease=$5 output=$6
+            gh api "repos/$repository/releases/tags/$tag" > "$output"
+            jq -e --arg tag "$tag" --argjson id "$release_id" --argjson pre "$prerelease" \
+              '.tag_name==$tag and .id==$id and .prerelease==$pre' "$output" >/dev/null
+            verify_tag_commit "$repository" "$tag" "$target"
+          }
+
+          download_asset() {
+            local repository=$1 release_json=$2 asset_id=$3 asset_name=$4 expected_size=$5 expected_sha=$6 output=$7
+            jq -e --argjson id "$asset_id" --arg name "$asset_name" --argjson size "$expected_size" --arg digest "sha256:$expected_sha" \
+              '.assets[]|select(.id==$id)|.name==$name and .size==$size and .digest==$digest' "$release_json" >/dev/null
+            gh api -H 'Accept: application/octet-stream' "repos/$repository/releases/assets/$asset_id" > "$output"
+            test "$(wc -c < "$output" | tr -d ' ')" = "$expected_size"
+            test "$(sha256sum "$output" | awk '{print $1}')" = "$expected_sha"
+          }
+
+          gooo_repo=$(jq -r '.gooo.repository' "$lock")
+          gooo_tag=$(jq -r '.gooo.tag' "$lock")
+          verify_release "$gooo_repo" "$gooo_tag" "$(jq -r '.gooo.release_id' "$lock")" "$(jq -r '.gooo.target_commit_sha' "$lock")" true "$WORK_DIR/gooo-release.json"
+          download_asset "$gooo_repo" "$WORK_DIR/gooo-release.json" "$(jq -r '.gooo.asset.id' "$lock")" "$(jq -r '.gooo.asset.name' "$lock")" "$(jq -r '.gooo.asset.size' "$lock")" "$(jq -r '.gooo.asset.sha256' "$lock")" "$WORK_DIR/gooo/gooo-linux-amd64.tar.gz"
+          download_asset "$gooo_repo" "$WORK_DIR/gooo-release.json" "$(jq -r '.gooo.checksums.id' "$lock")" "$(jq -r '.gooo.checksums.name' "$lock")" "$(jq -r '.gooo.checksums.size' "$lock")" "$(jq -r '.gooo.checksums.sha256' "$lock")" "$WORK_DIR/gooo/SHA256SUMS"
+          (cd "$WORK_DIR/gooo" && sha256sum -c SHA256SUMS --ignore-missing)
+          tar -xzf "$WORK_DIR/gooo/gooo-linux-amd64.tar.gz" -C "$WORK_DIR/gooo/bin"
+          gooo=$(find "$WORK_DIR/gooo/bin" -type f -name gooo -print -quit)
+          test -n "$gooo"
+          chmod +x "$gooo"
+          printf '%s\n' "$gooo" > "$WORK_DIR/gooo-path"
+
+          tofu_repo=$(jq -r '.opentofu.repository' "$lock")
+          tofu_tag=$(jq -r '.opentofu.tag' "$lock")
+          verify_release "$tofu_repo" "$tofu_tag" "$(jq -r '.opentofu.release_id' "$lock")" "$(jq -r '.opentofu.target_commit_sha' "$lock")" false "$WORK_DIR/tofu-release.json"
+          download_asset "$tofu_repo" "$WORK_DIR/tofu-release.json" "$(jq -r '.opentofu.asset.id' "$lock")" "$(jq -r '.opentofu.asset.name' "$lock")" "$(jq -r '.opentofu.asset.size' "$lock")" "$(jq -r '.opentofu.asset.sha256' "$lock")" "$WORK_DIR/tofu/tofu.zip"
+          download_asset "$tofu_repo" "$WORK_DIR/tofu-release.json" "$(jq -r '.opentofu.checksums.id' "$lock")" "$(jq -r '.opentofu.checksums.name' "$lock")" "$(jq -r '.opentofu.checksums.size' "$lock")" "$(jq -r '.opentofu.checksums.sha256' "$lock")" "$WORK_DIR/tofu/SHA256SUMS"
+          tofu_asset_name=$(jq -r '.opentofu.asset.name' "$lock")
+          cp "$WORK_DIR/tofu/tofu.zip" "$WORK_DIR/tofu/$tofu_asset_name"
+          (cd "$WORK_DIR/tofu" && awk -v name="$tofu_asset_name" '$2==name {print}' SHA256SUMS | sha256sum -c -)
+          unzip -q "$WORK_DIR/tofu/tofu.zip" -d "$WORK_DIR/tofu/bin"
+          tofu=$(find "$WORK_DIR/tofu/bin" -type f -name tofu -print -quit)
+          test -n "$tofu"
+          chmod +x "$tofu"
+          test "$(sha256sum "$tofu" | awk '{print $1}')" = "$(jq -r '.opentofu.binary_sha256' "$lock")"
+          printf '%s\n' "$tofu" > "$WORK_DIR/tofu-path"
+
+          spec_url=$(jq -r '.opentofu.json_spec.url' "$lock")
+          curl --fail --location --silent --show-error "$spec_url" -o "$WORK_DIR/opentofu-json-spec.mdx"
+          test "$(sha256sum "$WORK_DIR/opentofu-json-spec.mdx" | awk '{print $1}')" = "$(jq -r '.opentofu.json_spec.sha256' "$lock")"
+          go version > "$WORK_DIR/go-version.txt"
+
+      - name: Bind the released Gooo semantic graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          gooo=$(cat "$WORK_DIR/gooo-path")
+          start_ns=$(date +%s%N)
+          /usr/bin/time -f '%M' -o "$WORK_DIR/bind-rss-kib" "$gooo" graph dump examples/intent/main.gooo > "$WORK_DIR/graph.json"
+          end_ns=$(date +%s%N)
+          echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/bind-wall-ms"
+          python3 scripts/envelope.py bind --source examples/intent/main.gooo --graph "$WORK_DIR/graph.json" --denominator contracts/envelope-v1.json --output "$WORK_DIR/bindings.json"
+          jq -e '.state=="CLOSED" and .activity_count==12 and .binding_edges==14 and (.bindings|length)==12' "$WORK_DIR/bindings.json" >/dev/null
+
+      - name: Record repository inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/envelope.py inventory --root . --output "$WORK_DIR/inventory.json"
+          jq -e '.root_readme_excluded==true and (.descendant_directory_count|type)=="number" and (.regular_file_count|type)=="number"' "$WORK_DIR/inventory.json" >/dev/null
+
+      - name: Generate deterministic artifact and human dossier
+        shell: bash
+        run: |
+          set -euo pipefail
+          start_ns=$(date +%s%N)
+          /usr/bin/time -f '%M' -o "$WORK_DIR/generate-rss-kib" python3 scripts/envelope.py generate \
+            --source examples/intent/main.gooo --graph "$WORK_DIR/graph.json" --lock contracts/release-lock-v1.json \
+            --spec "$WORK_DIR/opentofu-json-spec.mdx" --bindings "$WORK_DIR/bindings.json" --denominator contracts/envelope-v1.json \
+            --inventory "$WORK_DIR/inventory.json" --output-dir "$PUBLISH_DIR"
+          end_ns=$(date +%s%N)
+          echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/generate-wall-ms"
+          test "$(find "$PUBLISH_DIR" -maxdepth 1 -type f -printf '%f\n' | sort | tr '\n' ' ')" = "dossier.md intent.tf.json "
+
+      - name: Validate generated output with the official OpenTofu binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$WORK_DIR/module"
+          cp "$PUBLISH_DIR/intent.tf.json" "$WORK_DIR/module/intent.tf.json"
+          tofu=$(cat "$WORK_DIR/tofu-path")
+          start_ns=$(date +%s%N)
+          /usr/bin/time -f '%M' -o "$WORK_DIR/validate-rss-kib" bash -c "cd '$WORK_DIR/module' && '$tofu' validate -json > '$WORK_DIR/tofu-validate.json'"
+          end_ns=$(date +%s%N)
+          echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/validate-wall-ms"
+          python3 scripts/envelope.py validate --tofu-json "$WORK_DIR/tofu-validate.json" --artifact "$PUBLISH_DIR/intent.tf.json" --output "$WORK_DIR/validation.json"
+          jq -e '.state=="CLOSED" and .official_opentofu.valid==true and .structural_checks.output_file_count==2' "$WORK_DIR/validation.json" >/dev/null
+
+      - name: Capture pinned OpenTofu JSON plan receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          tofu=$(cat "$WORK_DIR/tofu-path")
+          "$tofu" version -json > "$WORK_DIR/tofu-version.json"
+          start_ns=$(date +%s%N)
+          set +e
+          (cd "$WORK_DIR/module" && /usr/bin/time -f '%M' -o "$WORK_DIR/plan-rss-kib" "$tofu" plan -refresh=false -input=false -json -detailed-exitcode > "$WORK_DIR/tofu-plan.jsonl")
+          plan_status=$?
+          set -e
+          end_ns=$(date +%s%N)
+          echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/plan-wall-ms"
+          test "$plan_status" -eq 0 -o "$plan_status" -eq 2
+          plan_rss_kib=$(tail -n 1 "$WORK_DIR/plan-rss-kib")
+          printf '%s\n' "$plan_rss_kib" > "$WORK_DIR/plan-rss-kib"
+          test "$plan_rss_kib" -ge 0
+          python3 scripts/envelope.py plan-receipt --plan-ui "$WORK_DIR/tofu-plan.jsonl" --version-json "$WORK_DIR/tofu-version.json" \
+            --binary "$tofu" --artifact "$PUBLISH_DIR/intent.tf.json" --oracle fixtures/plan-oracle-v1.json \
+            --lock contracts/release-lock-v1.json --exit-code "$plan_status" --output "$WORK_DIR/plan-receipt.json"
+          match_start_ns=$(date +%s%N)
+          python3 scripts/envelope.py match-plan --artifact "$PUBLISH_DIR/intent.tf.json" --receipt "$WORK_DIR/plan-receipt.json" \
+            --oracle fixtures/plan-oracle-v1.json --output "$WORK_DIR/plan-match.json"
+          match_end_ns=$(date +%s%N)
+          echo $(( (match_end_ns-match_start_ns+999999)/1000000 )) > "$WORK_DIR/plan-match-wall-ms"
+          printf '%s\n' "$(cat "$WORK_DIR/plan-rss-kib")" > "$WORK_DIR/match-rss-kib"
+          jq -e '.state=="CLOSED" and .iac_engine=="OPENTOFU" and .engine_identity_source=="PINNED_RELEASE_LOCK" and .exit_code==2 and .drift_count==0 and .resource_actions==[{"address":"terraform_data.hello","action":"create"}]' "$WORK_DIR/plan-receipt.json" >/dev/null
+          jq -e '.state=="CLOSED" and .claim.state=="CLOSED" and .resource_action_count==1 and .expected_resource_actions==.observed_resource_actions' "$WORK_DIR/plan-match.json" >/dev/null
+
+      - name: Evaluate three canonical cases in each outcome class
+        shell: bash
+        run: |
+          set -euo pipefail
+          start_ns=$(date +%s%N)
+          /usr/bin/time -f '%M' -o "$WORK_DIR/cases-rss-kib" python3 scripts/envelope.py cases --plan-match "$WORK_DIR/plan-match.json" --bindings "$WORK_DIR/bindings.json" --output "$WORK_DIR/cases.json"
+          end_ns=$(date +%s%N)
+          echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/cases-wall-ms"
+          jq -e '.state=="CLOSED" and .case_count==9 and ([.cases[]|select(.class=="normal")]|length)==3 and ([.cases[]|select(.class=="unknown")]|length)==3 and ([.cases[]|select(.class=="refuted")]|length)==3 and all(.cases[]|if .class=="unknown" then all(.claims[]; (.stage and .step and .reason and .unknown_class and .next_operation and (.blocked_by|type=="array"))) elif .class=="refuted" then all(.claims[];.state=="REFUTED") else true end)' "$WORK_DIR/cases.json" >/dev/null
+
+      - name: Verify deterministic replay
+        shell: bash
+        run: |
+          set -euo pipefail
+          start_ns=$(date +%s%N)
+          /usr/bin/time -f '%M' -o "$WORK_DIR/replay-rss-kib" python3 scripts/envelope.py replay \
+            --publish-dir "$PUBLISH_DIR" --source examples/intent/main.gooo --graph "$WORK_DIR/graph.json" --lock contracts/release-lock-v1.json \
+            --spec "$WORK_DIR/opentofu-json-spec.mdx" --bindings "$WORK_DIR/bindings.json" --denominator contracts/envelope-v1.json \
+            --inventory "$WORK_DIR/inventory.json" --output "$WORK_DIR/replay.json"
+          end_ns=$(date +%s%N)
+          echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/replay-wall-ms"
+          jq -e '.state=="CLOSED" and .comparison_count==2 and all(.comparisons[];.byte_equal==true)' "$WORK_DIR/replay.json" >/dev/null
+
+      - name: Record activity-linked observations and publish evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -S -n \
+            --argjson bind_wall "$(cat "$WORK_DIR/bind-wall-ms")" --argjson bind_rss "$(cat "$WORK_DIR/bind-rss-kib")" \
+            --argjson generate_wall "$(cat "$WORK_DIR/generate-wall-ms")" --argjson generate_rss "$(cat "$WORK_DIR/generate-rss-kib")" \
+            --argjson validate_wall "$(cat "$WORK_DIR/validate-wall-ms")" --argjson validate_rss "$(cat "$WORK_DIR/validate-rss-kib")" \
+            --argjson plan_wall "$(cat "$WORK_DIR/plan-wall-ms")" --argjson plan_rss "$(cat "$WORK_DIR/plan-rss-kib")" \
+            --argjson match_wall "$(cat "$WORK_DIR/plan-match-wall-ms")" --argjson match_rss "$(cat "$WORK_DIR/match-rss-kib")" \
+            --argjson cases_wall "$(cat "$WORK_DIR/cases-wall-ms")" --argjson cases_rss "$(cat "$WORK_DIR/cases-rss-kib")" \
+            --argjson replay_wall "$(cat "$WORK_DIR/replay-wall-ms")" --argjson replay_rss "$(cat "$WORK_DIR/replay-rss-kib")" \
+            '[
+              {stage:"build",wall_ms:($bind_wall+$generate_wall),peak_rss_kib:([$bind_rss,$generate_rss]|max),count:2,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:0,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0},
+              {stage:"test",wall_ms:$cases_wall,peak_rss_kib:$cases_rss,count:9,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:9,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0},
+              {stage:"conformance",wall_ms:($validate_wall+$plan_wall+$match_wall+$replay_wall),peak_rss_kib:([$validate_rss,$plan_rss,$match_rss,$replay_rss]|max),count:4,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:0,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0}
+            ]' > "$WORK_DIR/measurements.json"
+          python3 scripts/envelope.py record \
+            --publish-dir "$PUBLISH_DIR" --source examples/intent/main.gooo --graph "$WORK_DIR/graph.json" --lock contracts/release-lock-v1.json \
+            --spec "$WORK_DIR/opentofu-json-spec.mdx" --bindings "$WORK_DIR/bindings.json" --denominator contracts/envelope-v1.json \
+            --inventory "$WORK_DIR/inventory.json" --validation "$WORK_DIR/validation.json" --receipt "$WORK_DIR/plan-receipt.json" \
+            --match "$WORK_DIR/plan-match.json" --oracle fixtures/plan-oracle-v1.json --cases "$WORK_DIR/cases.json" --replay "$WORK_DIR/replay.json" \
+            --measurements "$WORK_DIR/measurements.json" --output "$EVIDENCE_DIR/observation.json"
+          cp "$PUBLISH_DIR/intent.tf.json" "$EVIDENCE_DIR/intent.tf.json"
+          cp "$PUBLISH_DIR/dossier.md" "$EVIDENCE_DIR/dossier.md"
+          cp "$WORK_DIR/graph.json" "$EVIDENCE_DIR/released-semantic-graph.json"
+          cp "$WORK_DIR/bindings.json" "$EVIDENCE_DIR/bindings.json"
+          cp "$WORK_DIR/inventory.json" "$EVIDENCE_DIR/inventory.json"
+          cp "$WORK_DIR/validation.json" "$EVIDENCE_DIR/validation.json"
+          cp "$WORK_DIR/tofu-validate.json" "$EVIDENCE_DIR/tofu-validate.json"
+          cp "$WORK_DIR/tofu-version.json" "$EVIDENCE_DIR/tofu-version.json"
+          cp "$WORK_DIR/tofu-plan.jsonl" "$EVIDENCE_DIR/tofu-plan.jsonl"
+          cp "$WORK_DIR/plan-receipt.json" "$EVIDENCE_DIR/plan-receipt.json"
+          cp "$WORK_DIR/plan-match.json" "$EVIDENCE_DIR/plan-match.json"
+          cp fixtures/plan-oracle-v1.json "$EVIDENCE_DIR/plan-oracle-v1.json"
+          cp "$WORK_DIR/cases.json" "$EVIDENCE_DIR/cases.json"
+          cp "$WORK_DIR/replay.json" "$EVIDENCE_DIR/replay.json"
+          cp contracts/envelope-v1.json "$EVIDENCE_DIR/envelope-v1.json"
+          cp contracts/release-lock-v1.json "$EVIDENCE_DIR/release-lock-v1.json"
+          jq -e '
+            .state=="CLOSED" and
+            (.primary_metrics|length)==12 and
+            (.metrics|all(.[]; (.activity_id|type)=="string" and (.producer|keys|length)==4)) and
+            .generated_outputs.file_count==2 and
+            .cases.case_count==9 and
+            .plan_match.state=="CLOSED" and
+            .authority.repository_writes==0 and
+            .authority.opentofu_apply_executions==0 and
+            .authority.opentofu_test_executions==0 and
+            .reuse_contract.installation_binary_cache_state=="DISABLED" and
+            .reuse_contract.go_build_cache_state=="DISABLED" and
+            .reuse_contract.prior_test_evidence_reuse_state=="NOT_REUSED"
+          ' "$EVIDENCE_DIR/observation.json" >/dev/null
+
+      - name: Upload envelope evidence
+        id: evidence
+        uses: actions/upload-artifact@v6
+        with:
+          name: gooo-opentofu-envelope-evidence-${{ github.sha }}
+          path: ${{ env.EVIDENCE_DIR }}
+          if-no-files-found: error
+          compression-level: 0
+
+      - name: Summarize exact observations
+        shell: bash
+        run: |
+          set -euo pipefail
+          observation="$EVIDENCE_DIR/observation.json"
+          build=$(jq -r '.verification_stages[] | select(.stage=="build") | "wall_ms=" + (.wall_ms|tostring) + ", peak_rss_kib=" + (.peak_rss_kib|tostring)' "$observation")
+          test_stage=$(jq -r '.verification_stages[] | select(.stage=="test") | "wall_ms=" + (.wall_ms|tostring) + ", peak_rss_kib=" + (.peak_rss_kib|tostring) + ", executed=" + (.executed_test_count|tostring) + ", reused=" + (.reused_test_evidence_count|tostring) + ", skipped=" + (.skipped_test_count|tostring) + ", not_observed=" + (.not_observed_test_count|tostring)' "$observation")
+          conformance=$(jq -r '.verification_stages[] | select(.stage=="conformance") | "wall_ms=" + (.wall_ms|tostring) + ", peak_rss_kib=" + (.peak_rss_kib|tostring)' "$observation")
+          {
+            echo "## Gooo OpenTofu Envelope"
+            echo
+            echo "- canonical cases: normal=3, UNKNOWN=3, REFUTED=3"
+            echo "- build: $build"
+            echo "- test: $test_stage"
+            echo "- conformance: $conformance"
+            echo "- artifact files / bytes: $(jq -r '.generated_outputs.file_count' "$observation") / $(jq -r '.generated_outputs.bytes' "$observation")"
+            echo "- repository_writes: $(jq -r '.authority.repository_writes' "$observation")"
+            echo "- OpenTofu: $(jq -r '.plan_receipt.iac_engine + " " + .plan_receipt.engine_version + ", exit_code=" + (.plan_receipt.exit_code|tostring) + ", resource_actions=" + (.plan_match.resource_action_count|tostring)' "$observation")"
+            echo "- artifact digest: ${{ steps.evidence.outputs.artifact-digest }}"
+          } >> "$GITHUB_STEP_SUMMARY"

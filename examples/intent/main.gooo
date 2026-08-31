@@ -1,0 +1,29 @@
+package opentofuenvelope
+namespace opentofuenvelope
+
+entity InfrastructureIntent id "envelope://opentofu/intent/hello"
+entity TerraformDataIntent id "envelope://opentofu/intent/hello/terraform-data"
+entity OpenTofuSpecBinding id "envelope://opentofu/intent/hello/spec-binding"
+entity OpenTofuJSONSpecReceipt id "envelope://opentofu/intent/hello/spec-receipt"
+entity OpenTofuArtifact id "envelope://opentofu/intent/hello/artifact"
+entity HumanDossier id "envelope://opentofu/intent/hello/dossier"
+entity NormalVerification id "envelope://opentofu/intent/hello/normal-verification"
+entity OpenTofuPlanReceipt id "envelope://opentofu/intent/hello/plan-receipt"
+entity PlanIntentMatch id "envelope://opentofu/intent/hello/plan-intent-match"
+entity UnknownCase id "envelope://opentofu/intent/hello/unknown"
+entity RefutedCase id "envelope://opentofu/intent/hello/refuted"
+entity ReplayVerification id "envelope://opentofu/intent/hello/replay"
+entity ReadOnlyObservation id "envelope://opentofu/intent/hello/read-only"
+
+activity DeclareGoooInfrastructureIntent(InfrastructureIntent) -> TerraformDataIntent
+activity BindGoooIntentToOpenTofu(TerraformDataIntent) -> OpenTofuSpecBinding
+activity ConsumePinnedOpenTofuJSONSpec(OpenTofuSpecBinding) -> OpenTofuJSONSpecReceipt
+activity GenerateOpenTofuCompatibleArtifact(OpenTofuJSONSpecReceipt) -> OpenTofuArtifact
+activity GenerateHumanDossier(OpenTofuArtifact) -> HumanDossier
+activity VerifyGeneratedOutputs(HumanDossier) -> NormalVerification
+activity GenerateOpenTofuPlanReceipt(NormalVerification) -> OpenTofuPlanReceipt
+activity MatchGoooIntentToOpenTofuPlan(OpenTofuPlanReceipt) -> PlanIntentMatch
+activity PreserveUnknownCase(PlanIntentMatch) -> UnknownCase
+activity RefuteContradictionCase(PlanIntentMatch) -> RefutedCase
+activity VerifyDeterministicReplay(NormalVerification) -> ReplayVerification
+activity PreserveReadOnlyBoundary(UnknownCase, RefutedCase, ReplayVerification, PlanIntentMatch) -> ReadOnlyObservation

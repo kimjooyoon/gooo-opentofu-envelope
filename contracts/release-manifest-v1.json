@@ -1,0 +1,55 @@
+{
+  "schema": "gooo/opentofu-envelope/release-manifest/v1",
+  "version": 1,
+  "release": {
+    "tag": "v0.1.4",
+    "asset_count_before": 0,
+    "asset_count_after": 4,
+    "predecessor": {
+      "tag": "v0.1.3",
+      "release_id": 379957493,
+      "asset_count": 0,
+      "must_remain_unchanged": true
+    }
+  },
+  "required_assets": [
+    "evidence-v0.1.4.tar.gz",
+    "manifest-v0.1.4.json",
+    "SHA256SUMS",
+    "source-v0.1.4.tar.gz"
+  ],
+  "source_identity": {
+    "tag_must_be_annotated": true,
+    "tag_target_must_equal_merge_commit": true,
+    "main_ci_head_sha_must_equal_tag_target": true,
+    "main_ci_observation_source_sha_must_equal_tag_source_sha": true
+  },
+  "pipeline": {
+    "evidence_source": "SUCCESSFUL_MAIN_CI_ARTIFACT",
+    "semantic_path": [
+      "RELEASED_GOOO_GRAPH",
+      "main.tf.json",
+      "PINNED_OPENTOFU_VALIDATE_JSON",
+      "INDEPENDENT_SERVICE_ORACLE"
+    ],
+    "local_execution_in_release_workflow": 0
+  },
+  "toolchain": {
+    "go": "1.27.x"
+  },
+  "authority": {
+    "semantic_graph_state": "CLOSED",
+    "semantic_graph_scope": "GOOO_SEMANTIC_GRAPH_ONLY",
+    "external_utility_state": "UNKNOWN",
+    "global_core_authority_claim": "NOT_MADE"
+  },
+  "checksum_contract": {
+    "sha256sums_lists": [
+      "evidence-v0.1.4.tar.gz",
+      "manifest-v0.1.4.json",
+      "source-v0.1.4.tar.gz"
+    ],
+    "sha256sums_excludes_self": true,
+    "server_asset_digest_and_download_digest_must_match": true
+  }
+}

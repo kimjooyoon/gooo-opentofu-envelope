@@ -54,3 +54,25 @@ failure rather than silently reported as zero writes. Core semantic authority
 is `CLOSED` only when the released Gooo IR, pinned OpenTofu JSON validation, and
 independent service oracle all provide evidence; utility remains explicitly
 unclosed until a before/after user observation exists.
+
+## v0.1.4 durable release evidence
+
+The v0.1.3 release is intentionally preserved as a counterexample: its release
+is immutable and has zero release assets. The v0.1.4 release contract records
+that predecessor release ID (`379957493`), `asset_count_before=0`, and
+`asset_count_after=4`; it does not rewrite or delete v0.1.3.
+
+The tag-only release workflow consumes the successful main CI evidence artifact
+whose head SHA and observation source digest are identical to the annotated
+`v0.1.4` tag target. It packages the existing read-only evidence for the
+released Gooo graph -> `main.tf.json` -> pinned OpenTofu `validate -json` ->
+independent service oracle path. In caller-owned temporary storage it creates
+exactly these four assets: `evidence-v0.1.4.tar.gz`,
+`manifest-v0.1.4.json`, `SHA256SUMS`, and `source-v0.1.4.tar.gz`.
+
+The workflow publishes the release only after all four assets are present, then
+checks the server-reported size and digest for every asset and verifies the
+digest of every actual download. The manifest scopes `CLOSED` to this Gooo
+semantic graph authority, leaves external utility `UNKNOWN`, and makes no
+global core-authority claim. The release workflow itself performs no local
+tests, builds, or OpenTofu execution.

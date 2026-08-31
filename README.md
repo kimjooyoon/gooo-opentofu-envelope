@@ -1,28 +1,49 @@
-# Gooo OpenTofu Envelope
+# Gooo OpenTofu Service Contract Envelope
 
-This repository demonstrates a real, read-only infrastructure handoff: a
-Gooo intent declares a built-in `terraform_data.hello` resource, the pinned
-OpenTofu CLI validates and plans the generated JSON configuration, and the
-resulting machine observation is bound back to the intent in a human dossier.
+This repository closes one deliberately small path:
 
-The boundary is deliberately narrow. GitHub Actions acquires checksum-locked
-Gooo and OpenTofu releases, records `go version` for Go 1.27, then observes
-only `version -json`, `validate -json`, the plan exit code, and `show -json`.
-The plan file and every generated output live in caller-owned temporary
-directories. No provider, credential, cloud, network, init, apply, destroy,
-import, state mutation, or input-repository write is allowed.
+`Gooo service-infrastructure contract -> generated main.tf.json -> OpenTofu validate -json -> independent semantic oracle`
 
-The contract fixes twelve cells and twelve one-to-one Gooo activities, with
-four cells in each proof family and indicator class. The evidence includes
-at least three normal, three UNKNOWN, and three REFUTED cases, with precedence
-`REFUTED > UNKNOWN > CLOSED`. UNKNOWN claims retain stage, step, reason,
-unknown_class, next_operation, and blocked_by. A cache hit is never treated as
-test-evidence reuse; because this example has no exact before/after pair,
-improvement is reported as UNKNOWN.
+The `.gooo` input declares a `web` service with type `http`, port `8080`, the
+`APP_ENV=production` environment, three required outputs, and four semantic
+relations. The workflow obtains checksum-locked releases, dumps the released
+Gooo graph, generates providerless OpenTofu JSON, and runs the pinned OpenTofu
+CLI at the machine-readable `version -json` and `validate -json` boundary.
 
-The default branch began as the intentionally minimal `.gitignore`, `LICENSE`,
-and `README.md` bootstrap. The implementation was added through a reviewed
-pull request and is verified only by the Actions workflow. The workflow also
-publishes an evidence artifact containing exact wall time, peak RSS, test
-execution counts, artifact sizes/digests, Go/Gooo physical lines, repository
-inventory, and zero-authority observations.
+The generated artifact is exactly `main.tf.json`, `contract-receipt.json`, and
+`dossier.md`. The receipt carries checksum verification, binary digest, version
+JSON digest, validation exit code, diagnostic counts, and the immutable
+source -> released IR -> generated JSON -> OpenTofu observation -> independent
+oracle chain. The oracle checks service values, types, required outputs, and
+relations; a template's mere presence cannot close the case.
+
+The default profile is read-only. It forbids provider installation, init
+download, plan/apply/destroy/import, state/backend access, credentials, cloud or
+network infrastructure access, `tofu test`, and TF_ACC acceptance tests. A
+separate authorized profile is required for acceptance testing and is outside
+this envelope. Existing Terraform-compatible names are not treated as product
+identity: the receipt identifies the engine as `OPENTOFU 1.12.6` from the
+pinned release lock.
+
+The denominator is fixed at twelve cells and twelve one-to-one Gooo activities:
+FOUNDATION, COHERENCE, and REGRESSION each have four proof cells; DRIVER,
+OUTCOME, and GUARDRAIL each have four indicator cells. Canonical cases are
+normal=3, UNKNOWN=3, REFUTED=3, with `REFUTED > UNKNOWN > CLOSED`. Every
+UNKNOWN has `stage`, `step`, `reason`, `unknown_class`, `next_operation`, and
+array-valued `blocked_by`; a directly missing input uses an empty array.
+
+Verification phases record `EXECUTED`, `REUSED`, `SKIPPED`, or
+`NOT_APPLICABLE` independently from cache `HIT`, `MISS`, `DISABLED`, or
+`UNKNOWN`. Installation binary cache, Go build cache, and prior test-evidence
+reuse are separate fields. Runner persistence is `EPHEMERAL`, `PERSISTENT`, or
+`UNKNOWN`; a binary cache hit never means test evidence was reused. Prior
+evidence is eligible only when all eight reuse-key fields match:
+source, toolchain, command, config, dependency, provider-lock,
+test-inventory, and policy digests. Reuse is never reported as a zero-millisecond
+current-run execution.
+
+No exact before/after pair exists in this use case, so performance improvement
+remains `UNKNOWN`. The workflow records exact integer wall milliseconds, peak
+RSS KiB, test counts, replay comparisons, artifact files/bytes, repository
+writes, infrastructure mutations, and provider-install/network attempts. The
+root README is excluded from repository inventory.

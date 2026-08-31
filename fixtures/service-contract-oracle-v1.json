@@ -1,0 +1,17 @@
+{
+  "schema": "gooo/opentofu-envelope/service-contract-oracle/v1",
+  "service": {"name": "web", "type": "http", "port": 8080},
+  "environment": {"name": "APP_ENV", "type": "string", "value": "production"},
+  "required_outputs": [
+    {"name": "service_url", "type": "string"},
+    {"name": "service_port", "type": "number"},
+    {"name": "service_type", "type": "string"}
+  ],
+  "relations": [
+    {"subject": "service", "predicate": "declares", "object": "service_port"},
+    {"subject": "service", "predicate": "declares", "object": "service_type"},
+    {"subject": "service", "predicate": "requires", "object": "service_url"},
+    {"subject": "environment", "predicate": "configures", "object": "service"}
+  ],
+  "side_effects": {"network": 0, "provider_install": 0, "infrastructure_mutation": 0, "state_mutation": 0}
+}

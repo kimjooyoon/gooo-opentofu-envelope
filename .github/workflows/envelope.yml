@@ -16,7 +16,6 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      SUBJECT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       WORK_DIR: /tmp/gooo-opentofu-envelope
       PUBLISH_DIR: /tmp/gooo-opentofu-envelope-publish
       EVIDENCE_DIR: /tmp/gooo-opentofu-envelope-evidence
@@ -47,7 +46,8 @@ jobs:
             .authority.local_build_executions==0 and
             .authority.local_formatter_executions==0 and
             .authority.opentofu_init_executions==0 and
-            .authority.opentofu_plan_executions==1 and
+            .authority.opentofu_plan_executions==0 and
+            .authority.opentofu_show_executions==0 and
             .authority.opentofu_validate_executions==1 and
             .authority.opentofu_apply_executions==0 and
             .authority.opentofu_destroy_executions==0 and
@@ -57,6 +57,9 @@ jobs:
             .authority.opentofu_provider_accesses==0 and
             .authority.opentofu_cloud_accesses==0 and
             .authority.opentofu_runtime_network_access_claimed==false and
+            .authority.opentofu_runtime_network_access_observed==false and
+            .policy.default_profile=="READ_ONLY" and
+            .policy.authorized_profile=="AUTHORIZED_ACCEPTANCE" and
             .cache_contract.installation_binary_cache_state=="DISABLED" and
             .cache_contract.go_build_cache_state=="DISABLED" and
             .cache_contract.prior_test_evidence_reuse_state=="NOT_REUSED" and
@@ -142,7 +145,7 @@ jobs:
           python3 scripts/envelope.py inventory --root . --output "$WORK_DIR/inventory.json"
           jq -e '.root_readme_excluded==true and (.descendant_directory_count|type)=="number" and (.regular_file_count|type)=="number"' "$WORK_DIR/inventory.json" >/dev/null
 
-      - name: Generate deterministic artifact and human dossier
+      - name: Generate deterministic service artifact and dossier
         shell: bash
         run: |
           set -euo pipefail
@@ -153,69 +156,69 @@ jobs:
             --inventory "$WORK_DIR/inventory.json" --output-dir "$PUBLISH_DIR"
           end_ns=$(date +%s%N)
           echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/generate-wall-ms"
-          test "$(find "$PUBLISH_DIR" -maxdepth 1 -type f -printf '%f\n' | sort | tr '\n' ' ')" = "dossier.md intent.tf.json "
+          test "$(find "$PUBLISH_DIR" -maxdepth 1 -type f -printf '%f\n' | sort | tr '\n' ' ')" = "dossier.md main.tf.json "
 
-      - name: Validate generated output with the official OpenTofu binary
+      - name: Validate generated JSON configuration with the official OpenTofu binary
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$WORK_DIR/module"
-          cp "$PUBLISH_DIR/intent.tf.json" "$WORK_DIR/module/intent.tf.json"
-          tofu=$(cat "$WORK_DIR/tofu-path")
-          start_ns=$(date +%s%N)
-          /usr/bin/time -f '%M' -o "$WORK_DIR/validate-rss-kib" bash -c "cd '$WORK_DIR/module' && '$tofu' validate -json > '$WORK_DIR/tofu-validate.json'"
-          end_ns=$(date +%s%N)
-          echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/validate-wall-ms"
-          python3 scripts/envelope.py validate --tofu-json "$WORK_DIR/tofu-validate.json" --artifact "$PUBLISH_DIR/intent.tf.json" --output "$WORK_DIR/validation.json"
-          jq -e '.state=="CLOSED" and .official_opentofu.valid==true and .structural_checks.output_file_count==2' "$WORK_DIR/validation.json" >/dev/null
-
-      - name: Capture pinned OpenTofu JSON plan receipt
-        shell: bash
-        run: |
-          set -euo pipefail
+          cp "$PUBLISH_DIR/main.tf.json" "$WORK_DIR/module/main.tf.json"
           tofu=$(cat "$WORK_DIR/tofu-path")
           "$tofu" version -json > "$WORK_DIR/tofu-version.json"
           start_ns=$(date +%s%N)
           set +e
-          (cd "$WORK_DIR/module" && /usr/bin/time -f '%M' -o "$WORK_DIR/plan-rss-kib" "$tofu" plan -refresh=false -input=false -out="$WORK_DIR/plan.bin" -detailed-exitcode > "$WORK_DIR/tofu-plan.stdout")
-          plan_status=$?
+          (cd "$WORK_DIR/module" && /usr/bin/time -f '%M' -o "$WORK_DIR/validate-rss-kib" "$tofu" validate -json > "$WORK_DIR/tofu-validate.json")
+          validate_status=$?
           set -e
           end_ns=$(date +%s%N)
-          echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/plan-wall-ms"
-          test "$plan_status" -eq 0 -o "$plan_status" -eq 2
-          plan_rss_kib=$(tail -n 1 "$WORK_DIR/plan-rss-kib")
-          printf '%s\n' "$plan_rss_kib" > "$WORK_DIR/plan-rss-kib"
-          test "$plan_rss_kib" -ge 0
-          show_start_ns=$(date +%s%N)
-          /usr/bin/time -f '%M' -o "$WORK_DIR/show-rss-kib" "$tofu" show -json "$WORK_DIR/plan.bin" > "$WORK_DIR/tofu-show.json"
-          show_end_ns=$(date +%s%N)
-          echo $(( (show_end_ns-show_start_ns+999999)/1000000 )) > "$WORK_DIR/show-wall-ms"
-          show_rss_kib=$(tail -n 1 "$WORK_DIR/show-rss-kib")
-          printf '%s\n' "$show_rss_kib" > "$WORK_DIR/show-rss-kib"
-          test "$show_rss_kib" -ge 0
-          python3 scripts/envelope.py plan-receipt --plan-show "$WORK_DIR/tofu-show.json" --version-json "$WORK_DIR/tofu-version.json" \
-            --binary "$tofu" --artifact "$PUBLISH_DIR/intent.tf.json" --oracle fixtures/plan-oracle-v1.json \
-            --lock contracts/release-lock-v1.json --exit-code "$plan_status" --output "$WORK_DIR/plan-receipt.json"
-          match_start_ns=$(date +%s%N)
-          python3 scripts/envelope.py match-plan --artifact "$PUBLISH_DIR/intent.tf.json" --receipt "$WORK_DIR/plan-receipt.json" \
-            --oracle fixtures/plan-oracle-v1.json --output "$WORK_DIR/plan-match.json"
-          match_end_ns=$(date +%s%N)
-          echo $(( (match_end_ns-match_start_ns+999999)/1000000 )) > "$WORK_DIR/plan-match-wall-ms"
-          printf '%s\n' "$(cat "$WORK_DIR/plan-rss-kib")" > "$WORK_DIR/match-rss-kib"
-          jq -e '.state=="CLOSED" and .iac_engine=="OPENTOFU" and .engine_identity_source=="PINNED_RELEASE_LOCK" and (.show_format_version|startswith("1.")) and .exit_code==2 and .drift_count==0 and .resource_actions==[{"address":"terraform_data.hello","action":"create"}]' "$WORK_DIR/plan-receipt.json" >/dev/null
-          jq -e '.state=="CLOSED" and .claim.state=="CLOSED" and .resource_action_count==1 and .expected_resource_actions==.observed_resource_actions' "$WORK_DIR/plan-match.json" >/dev/null
+          echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/validate-wall-ms"
+          test "$validate_status" -eq 0
+          test "$(cat "$WORK_DIR/validate-rss-kib")" -ge 0
+          python3 scripts/envelope.py validate --tofu-json "$WORK_DIR/tofu-validate.json" --artifact "$PUBLISH_DIR/main.tf.json" --output "$WORK_DIR/validation.json"
+          jq -e '.state=="CLOSED" and .official_opentofu.valid==true and .structural_checks.generated_config=="main.tf.json" and .structural_checks.providerless==true' "$WORK_DIR/validation.json" >/dev/null
+
+      - name: Capture immutable OpenTofu validation receipt
+        shell: bash
+        run: |
+          set -euo pipefail
+          tofu=$(cat "$WORK_DIR/tofu-path")
+          start_ns=$(date +%s%N)
+          /usr/bin/time -f '%M' -o "$WORK_DIR/receipt-rss-kib" python3 scripts/envelope.py contract-receipt \
+            --source examples/intent/main.gooo --graph "$WORK_DIR/graph.json" --artifact "$PUBLISH_DIR/main.tf.json" \
+            --validation "$WORK_DIR/validation.json" --tofu-json "$WORK_DIR/tofu-validate.json" --version-json "$WORK_DIR/tofu-version.json" \
+            --binary "$tofu" --oracle fixtures/service-contract-oracle-v1.json --lock contracts/release-lock-v1.json \
+            --exit-code 0 --output "$PUBLISH_DIR/contract-receipt.json"
+          end_ns=$(date +%s%N)
+          echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/receipt-wall-ms"
+          test "$(cat "$WORK_DIR/receipt-rss-kib")" -ge 0
+          jq -e '.state=="CLOSED" and .iac_engine=="OPENTOFU" and .engine_identity_source=="PINNED_RELEASE_LOCK" and .validation_exit_code==0 and .validation_attempted==1 and .validation_executed==1 and .checksum_verification.binary_matches_lock==true' "$PUBLISH_DIR/contract-receipt.json" >/dev/null
+
+      - name: Match the service contract with an independent semantic oracle
+        shell: bash
+        run: |
+          set -euo pipefail
+          start_ns=$(date +%s%N)
+          /usr/bin/time -f '%M' -o "$WORK_DIR/match-rss-kib" python3 scripts/envelope.py match-contract \
+            --source examples/intent/main.gooo --graph "$WORK_DIR/graph.json" --artifact "$PUBLISH_DIR/main.tf.json" \
+            --validation "$WORK_DIR/validation.json" --tofu-json "$WORK_DIR/tofu-validate.json" --receipt "$PUBLISH_DIR/contract-receipt.json" \
+            --oracle fixtures/service-contract-oracle-v1.json --output "$WORK_DIR/semantic-oracle-match.json"
+          end_ns=$(date +%s%N)
+          echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/match-wall-ms"
+          test "$(cat "$WORK_DIR/match-rss-kib")" -ge 0
+          jq -e '.state=="CLOSED" and .claim.state=="CLOSED" and .semantic_relation_count==4 and (.provenance|keys|length)==5' "$WORK_DIR/semantic-oracle-match.json" >/dev/null
 
       - name: Evaluate three canonical cases in each outcome class
         shell: bash
         run: |
           set -euo pipefail
           start_ns=$(date +%s%N)
-          /usr/bin/time -f '%M' -o "$WORK_DIR/cases-rss-kib" python3 scripts/envelope.py cases --plan-match "$WORK_DIR/plan-match.json" --bindings "$WORK_DIR/bindings.json" --output "$WORK_DIR/cases.json"
+          /usr/bin/time -f '%M' -o "$WORK_DIR/cases-rss-kib" python3 scripts/envelope.py cases --match "$WORK_DIR/semantic-oracle-match.json" --bindings "$WORK_DIR/bindings.json" --output "$WORK_DIR/cases.json"
           end_ns=$(date +%s%N)
           echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/cases-wall-ms"
-          jq -e '.state=="CLOSED" and .case_count==9 and ([.cases[]|select(.class=="normal")]|length)==3 and ([.cases[]|select(.class=="unknown")]|length)==3 and ([.cases[]|select(.class=="refuted")]|length)==3 and (.cases|all(.[]; if .class=="unknown" then all(.claims[]; (.stage and .step and .reason and .unknown_class and .next_operation and (.blocked_by|type=="array"))) elif .class=="refuted" then all(.claims[];.state=="REFUTED") else true end))' "$WORK_DIR/cases.json" >/dev/null
+          jq -e '.state=="CLOSED" and .case_count==9 and ([.cases[]|select(.class=="normal")]|length)==3 and ([.cases[]|select(.class=="unknown")]|length)==3 and ([.cases[]|select(.class=="refuted")]|length)==3 and (.state_precedence==["REFUTED","UNKNOWN","CLOSED"]) and (.cases|all(.[]; if .class=="unknown" then all(.claims[]; (.stage and .step and .reason and .unknown_class and .next_operation and (.blocked_by|type=="array"))) elif .class=="refuted" then all(.claims[];.state=="REFUTED") else true end))' "$WORK_DIR/cases.json" >/dev/null
 
-      - name: Verify deterministic replay
+      - name: Verify deterministic replay of generated outputs
         shell: bash
         run: |
           set -euo pipefail
@@ -236,23 +239,23 @@ jobs:
             --argjson bind_wall "$(cat "$WORK_DIR/bind-wall-ms")" --argjson bind_rss "$(cat "$WORK_DIR/bind-rss-kib")" \
             --argjson generate_wall "$(cat "$WORK_DIR/generate-wall-ms")" --argjson generate_rss "$(cat "$WORK_DIR/generate-rss-kib")" \
             --argjson validate_wall "$(cat "$WORK_DIR/validate-wall-ms")" --argjson validate_rss "$(cat "$WORK_DIR/validate-rss-kib")" \
-            --argjson plan_wall "$(cat "$WORK_DIR/plan-wall-ms")" --argjson plan_rss "$(cat "$WORK_DIR/plan-rss-kib")" \
-            --argjson show_wall "$(cat "$WORK_DIR/show-wall-ms")" --argjson show_rss "$(cat "$WORK_DIR/show-rss-kib")" \
-            --argjson match_wall "$(cat "$WORK_DIR/plan-match-wall-ms")" --argjson match_rss "$(cat "$WORK_DIR/match-rss-kib")" \
+            --argjson receipt_wall "$(cat "$WORK_DIR/receipt-wall-ms")" --argjson receipt_rss "$(cat "$WORK_DIR/receipt-rss-kib")" \
+            --argjson match_wall "$(cat "$WORK_DIR/match-wall-ms")" --argjson match_rss "$(cat "$WORK_DIR/match-rss-kib")" \
             --argjson cases_wall "$(cat "$WORK_DIR/cases-wall-ms")" --argjson cases_rss "$(cat "$WORK_DIR/cases-rss-kib")" \
             --argjson replay_wall "$(cat "$WORK_DIR/replay-wall-ms")" --argjson replay_rss "$(cat "$WORK_DIR/replay-rss-kib")" \
             '[
               {stage:"build",wall_ms:($bind_wall+$generate_wall),peak_rss_kib:([$bind_rss,$generate_rss]|max),count:2,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:0,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0},
               {stage:"test",wall_ms:$cases_wall,peak_rss_kib:$cases_rss,count:9,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:9,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0},
-              {stage:"conformance",wall_ms:($validate_wall+$plan_wall+$show_wall+$match_wall+$replay_wall),peak_rss_kib:([$validate_rss,$plan_rss,$show_rss,$match_rss,$replay_rss]|max),count:5,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:0,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0}
+              {stage:"conformance",wall_ms:($validate_wall+$receipt_wall+$match_wall+$replay_wall),peak_rss_kib:([$validate_rss,$receipt_rss,$match_rss,$replay_rss]|max),count:4,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:0,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0}
             ]' > "$WORK_DIR/measurements.json"
           python3 scripts/envelope.py record \
             --publish-dir "$PUBLISH_DIR" --source examples/intent/main.gooo --graph "$WORK_DIR/graph.json" --lock contracts/release-lock-v1.json \
             --spec "$WORK_DIR/opentofu-json-spec.mdx" --bindings "$WORK_DIR/bindings.json" --denominator contracts/envelope-v1.json \
-            --inventory "$WORK_DIR/inventory.json" --validation "$WORK_DIR/validation.json" --receipt "$WORK_DIR/plan-receipt.json" \
-            --match "$WORK_DIR/plan-match.json" --oracle fixtures/plan-oracle-v1.json --cases "$WORK_DIR/cases.json" --replay "$WORK_DIR/replay.json" \
+            --inventory "$WORK_DIR/inventory.json" --validation "$WORK_DIR/validation.json" --receipt "$PUBLISH_DIR/contract-receipt.json" \
+            --match "$WORK_DIR/semantic-oracle-match.json" --oracle fixtures/service-contract-oracle-v1.json --cases "$WORK_DIR/cases.json" --replay "$WORK_DIR/replay.json" \
             --measurements "$WORK_DIR/measurements.json" --go-version "$WORK_DIR/go-version.txt" --output "$EVIDENCE_DIR/observation.json"
-          cp "$PUBLISH_DIR/intent.tf.json" "$EVIDENCE_DIR/intent.tf.json"
+          cp "$PUBLISH_DIR/main.tf.json" "$EVIDENCE_DIR/main.tf.json"
+          cp "$PUBLISH_DIR/contract-receipt.json" "$EVIDENCE_DIR/contract-receipt.json"
           cp "$PUBLISH_DIR/dossier.md" "$EVIDENCE_DIR/dossier.md"
           cp "$WORK_DIR/graph.json" "$EVIDENCE_DIR/released-semantic-graph.json"
           cp "$WORK_DIR/bindings.json" "$EVIDENCE_DIR/bindings.json"
@@ -260,12 +263,9 @@ jobs:
           cp "$WORK_DIR/validation.json" "$EVIDENCE_DIR/validation.json"
           cp "$WORK_DIR/tofu-validate.json" "$EVIDENCE_DIR/tofu-validate.json"
           cp "$WORK_DIR/tofu-version.json" "$EVIDENCE_DIR/tofu-version.json"
-          cp "$WORK_DIR/tofu-plan.stdout" "$EVIDENCE_DIR/tofu-plan.stdout"
-          cp "$WORK_DIR/tofu-show.json" "$EVIDENCE_DIR/tofu-show.json"
           cp "$WORK_DIR/go-version.txt" "$EVIDENCE_DIR/go-version.txt"
-          cp "$WORK_DIR/plan-receipt.json" "$EVIDENCE_DIR/plan-receipt.json"
-          cp "$WORK_DIR/plan-match.json" "$EVIDENCE_DIR/plan-match.json"
-          cp fixtures/plan-oracle-v1.json "$EVIDENCE_DIR/plan-oracle-v1.json"
+          cp "$WORK_DIR/semantic-oracle-match.json" "$EVIDENCE_DIR/semantic-oracle-match.json"
+          cp fixtures/service-contract-oracle-v1.json "$EVIDENCE_DIR/service-contract-oracle-v1.json"
           cp "$WORK_DIR/cases.json" "$EVIDENCE_DIR/cases.json"
           cp "$WORK_DIR/replay.json" "$EVIDENCE_DIR/replay.json"
           cp contracts/envelope-v1.json "$EVIDENCE_DIR/envelope-v1.json"
@@ -273,19 +273,23 @@ jobs:
           jq -e '
             .state=="CLOSED" and
             (.primary_metrics|length)==12 and
-            (.metrics|all(.[]; (.activity_id|type)=="string" and (.producer|keys|length)==4)) and
-            .generated_outputs.file_count==2 and
+            (.metrics|length)==25 and
+            (.metrics|all(.[]; (.activity_id|type)=="string" and (.producer|keys|length)==6)) and
+            .generated_outputs.file_count==3 and
             .cases.case_count==9 and
             .cases.state_precedence==["REFUTED","UNKNOWN","CLOSED"] and
             .improvement.state=="UNKNOWN" and
             .improvement.cache_hit_is_not_reuse==true and
-            .plan_match.state=="CLOSED" and
+            .semantic_oracle_match.state=="CLOSED" and
+            .contract_receipt.validation_exit_code==0 and
             .authority.repository_writes==0 and
-            .authority.opentofu_apply_executions==0 and
+            .authority.opentofu_plan_executions==0 and
+            .authority.opentofu_show_executions==0 and
             .authority.opentofu_test_executions==0 and
             .reuse_contract.installation_binary_cache_state=="DISABLED" and
             .reuse_contract.go_build_cache_state=="DISABLED" and
-            .reuse_contract.prior_test_evidence_reuse_state=="NOT_REUSED"
+            .reuse_contract.prior_test_evidence_reuse_state=="NOT_REUSED" and
+            .reuse_contract.runner_persistence=="EPHEMERAL"
           ' "$EVIDENCE_DIR/observation.json" >/dev/null
 
       - name: Upload envelope evidence
@@ -306,16 +310,17 @@ jobs:
           test_stage=$(jq -r '.verification_stages[] | select(.stage=="test") | "wall_ms=" + (.wall_ms|tostring) + ", peak_rss_kib=" + (.peak_rss_kib|tostring) + ", executed=" + (.executed_test_count|tostring) + ", reused=" + (.reused_test_evidence_count|tostring) + ", skipped=" + (.skipped_test_count|tostring) + ", not_observed=" + (.not_observed_test_count|tostring)' "$observation")
           conformance=$(jq -r '.verification_stages[] | select(.stage=="conformance") | "wall_ms=" + (.wall_ms|tostring) + ", peak_rss_kib=" + (.peak_rss_kib|tostring)' "$observation")
           {
-            echo "## Gooo OpenTofu Envelope"
+            echo "## Gooo OpenTofu Service Contract"
             echo
             echo "- canonical cases: normal=3, UNKNOWN=3, REFUTED=3"
             echo "- build: $build"
             echo "- test: $test_stage"
             echo "- conformance: $conformance"
             echo "- Go toolchain: $(jq -r '.toolchain.go_version_evidence' "$observation")"
-            echo "- artifact files / bytes: $(jq -r '.generated_outputs.file_count' "$observation") / $(jq -r '.generated_outputs.bytes' "$observation")"
+            echo "- generated artifact files / bytes: $(jq -r '.generated_outputs.file_count' "$observation") / $(jq -r '.generated_outputs.bytes' "$observation")"
+            echo "- OpenTofu: $(jq -r '.contract_receipt.iac_engine + " " + .contract_receipt.engine_version + ", exit_code=" + (.contract_receipt.validation_exit_code|tostring) + ", diagnostics=" + (.contract_receipt.diagnostics.error_count|tostring) + "/" + (.contract_receipt.diagnostics.warning_count|tostring)' "$observation")"
+            echo "- semantic relations: $(jq -r '.semantic_oracle_match.semantic_relation_count' "$observation")"
             echo "- improvement: $(jq -r '.improvement.state + " (" + .improvement.claim.reason + ")"' "$observation")"
-            echo "- repository_writes: $(jq -r '.authority.repository_writes' "$observation")"
-            echo "- OpenTofu: $(jq -r '.plan_receipt.iac_engine + " " + .plan_receipt.engine_version + ", exit_code=" + (.plan_receipt.exit_code|tostring) + ", resource_actions=" + (.plan_match.resource_action_count|tostring)' "$observation")"
+            echo "- repository_writes / infrastructure_mutations / provider-install attempts: $(jq -r '[.authority.repository_writes, (.metrics[]|select(.name=="infrastructure_mutations")|.value), (.metrics[]|select(.name=="network_provider_install_attempts")|.value)] | join(" / ")' "$observation")"
             echo "- artifact digest: ${{ steps.evidence.outputs.artifact-digest }}"
           } >> "$GITHUB_STEP_SUMMARY"

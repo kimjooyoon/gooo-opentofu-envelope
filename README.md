@@ -55,7 +55,7 @@ is `CLOSED` only when the released Gooo IR, pinned OpenTofu JSON validation, and
 independent service oracle all provide evidence; utility remains explicitly
 unclosed until a before/after user observation exists.
 
-## v0.1.3 -> v0.1.4 -> v0.1.5 -> v0.1.6 release evidence
+## v0.1.3 -> v0.1.4 -> v0.1.5 -> v0.1.6 -> v0.1.7 release evidence
 
 The v0.1.3 release is intentionally preserved as the immutable zero-asset
 predecessor (`release_id=379957493`, `asset_count=0`). The annotated v0.1.4
@@ -73,15 +73,23 @@ its release is absent, its tag object is
 `bdee16c2506c0efdb3c5562f0d4126a293afc26f`, and failed trigger run IDs are
 `33430206446`, `33430284845`, `33430367725`, and `33430500643`.
 
-The tag-only v0.1.6 release workflow consumes the successful main CI evidence
+The annotated v0.1.6 tag is preserved as a third failed-trigger counterexample:
+its release is absent, its tag object is
+`cbe70a19dbf547868f907cb51954b66a0f774e66` -> target commit
+`744e32655c6a6d1adf8c31d334814b555bce1a69`, and tag-triggered run
+`33431118426` failed at runtime because the artifact ZIP request used an
+unsupported `Accept: application/zip` header. The tag and its failed run are
+not rewritten or deleted.
+
+The tag-only v0.1.7 release workflow consumes the successful main CI evidence
 artifact whose head SHA and observation source digest are identical to the
-annotated v0.1.6 tag target. It packages the existing read-only evidence for
+annotated v0.1.7 tag target. It packages the existing read-only evidence for
 the released Gooo graph -> `main.tf.json` -> pinned OpenTofu `validate -json` ->
 independent service oracle path. In caller-owned temporary storage it creates
-exactly these four assets: `evidence-v0.1.6.tar.gz`,
-`manifest-v0.1.6.json`, `SHA256SUMS`, and `source-v0.1.6.tar.gz`.
+exactly these four assets: `evidence-v0.1.7.tar.gz`,
+`manifest-v0.1.7.json`, `SHA256SUMS`, and `source-v0.1.7.tar.gz`.
 
-The workflow publishes v0.1.6 only after all four assets are present, then
+The workflow publishes v0.1.7 only after all four assets are present, then
 checks the server-reported size and digest for every asset and verifies the
 digest of every actual download. The manifest scopes `CLOSED` to this Gooo
 semantic graph authority, leaves external utility `UNKNOWN`, and makes no

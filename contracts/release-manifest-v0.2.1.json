@@ -2,14 +2,14 @@
   "schema": "gooo/opentofu-envelope/release-contract/v2",
   "version": 2,
   "release": {
-    "tag": "v0.2.0",
+    "tag": "v0.2.1",
     "asset_count_before": 0,
     "asset_count_after": 4,
     "required_assets": [
-      "evidence-v0.2.0.tar.gz",
-      "manifest-v0.2.0.json",
+      "evidence-v0.2.1.tar.gz",
+      "manifest-v0.2.1.json",
       "SHA256SUMS",
-      "source-v0.2.0.tar.gz"
+      "source-v0.2.1.tar.gz"
     ]
   },
   "predecessor_chain": [
@@ -83,12 +83,25 @@
       "asset_count": 4,
       "tag_object_sha": "8f913ac3bcef39a5105280a6a05114b7abc3ac87",
       "target_commit_sha": "b482afd68a864400a209cb4f439e727cfdfe2eda"
+    },
+    {
+      "tag": "v0.2.0",
+      "release_id": null,
+      "release_present": false,
+      "draft": false,
+      "immutable": false,
+      "asset_count": 0,
+      "state": "REFUTED",
+      "failed_release_run_ids": [33435908822],
+      "tag_object_sha": "9dfdee84d61f3acbe899b5ad57fd8f35f8159210",
+      "target_commit_sha": "c9f5de0b33fee1ca8546a627a8a94242b99c0733",
+      "failure_reason": "v0.1.5 target in the v0.2.0 release contract contained one extra trailing character"
     }
   ],
   "workflow": {
-    "path": ".github/workflows/release-v0.2.0.yml",
+    "path": ".github/workflows/release-v0.2.1.yml",
     "trigger_event": "push",
-    "trigger_tags": ["v0.2.0"],
+    "trigger_tags": ["v0.2.1"],
     "workflow_dispatch": false
   },
   "pipeline": {
@@ -125,9 +138,9 @@
   "checksum_contract": {
     "algorithm": "sha256",
     "sha256sums_lists": [
-      "evidence-v0.2.0.tar.gz",
-      "manifest-v0.2.0.json",
-      "source-v0.2.0.tar.gz"
+      "evidence-v0.2.1.tar.gz",
+      "manifest-v0.2.1.json",
+      "source-v0.2.1.tar.gz"
     ],
     "sha256sums_excludes_self": true,
     "server_asset_digest_and_download_digest_must_match": true

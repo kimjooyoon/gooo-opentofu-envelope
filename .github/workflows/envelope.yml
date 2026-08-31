@@ -205,7 +205,7 @@ jobs:
           /usr/bin/time -f '%M' -o "$WORK_DIR/cases-rss-kib" python3 scripts/envelope.py cases --plan-match "$WORK_DIR/plan-match.json" --bindings "$WORK_DIR/bindings.json" --output "$WORK_DIR/cases.json"
           end_ns=$(date +%s%N)
           echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/cases-wall-ms"
-          jq -e '.state=="CLOSED" and .case_count==9 and ([.cases[]|select(.class=="normal")]|length)==3 and ([.cases[]|select(.class=="unknown")]|length)==3 and ([.cases[]|select(.class=="refuted")]|length)==3 and all(.cases[]|if .class=="unknown" then all(.claims[]; (.stage and .step and .reason and .unknown_class and .next_operation and (.blocked_by|type=="array"))) elif .class=="refuted" then all(.claims[];.state=="REFUTED") else true end)' "$WORK_DIR/cases.json" >/dev/null
+          jq -e '.state=="CLOSED" and .case_count==9 and ([.cases[]|select(.class=="normal")]|length)==3 and ([.cases[]|select(.class=="unknown")]|length)==3 and ([.cases[]|select(.class=="refuted")]|length)==3 and (.cases|all(.[]; if .class=="unknown" then all(.claims[]; (.stage and .step and .reason and .unknown_class and .next_operation and (.blocked_by|type=="array"))) elif .class=="refuted" then all(.claims[];.state=="REFUTED") else true end))' "$WORK_DIR/cases.json" >/dev/null
 
       - name: Verify deterministic replay
         shell: bash

@@ -7,7 +7,6 @@ import argparse
 import hashlib
 import json
 import os
-import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -110,6 +109,8 @@ def release_lock(path: Path) -> dict[str, Any]:
     tofu = value.get("opentofu", {})
     if tofu.get("iac_engine") != "OPENTOFU" or tofu.get("iac_engine_version") != "1.12.6":
         die("release lock does not explicitly identify OpenTofu")
+    if value.get("toolchain", {}).get("go") != "1.27.x":
+        die("release lock does not explicitly identify Go 1.27")
     authority = value.get("authority", {})
     required_zero = [
         "repository_writes", "local_test_executions", "local_build_executions", "local_formatter_executions",
@@ -117,7 +118,7 @@ def release_lock(path: Path) -> dict[str, Any]:
         "opentofu_apply_executions", "opentofu_destroy_executions", "opentofu_import_executions", "opentofu_state_mutations",
         "opentofu_test_executions", "opentofu_provider_accesses", "opentofu_cloud_accesses",
     ]
-    if any(authority.get(key) != 0 for key in required_zero) or authority.get("opentofu_validate_executions") != 1 or authority.get("opentofu_plan_executions") != 1:
+    if any(authority.get(key) != 0 for key in required_zero) or authority.get("opentofu_validate_executions") != 1 or authority.get("opentofu_plan_executions") != 1 or authority.get("opentofu_show_executions") != 1:
         die("release lock authority is not read-only")
     cache = value.get("cache_contract", {})
     if cache.get("installation_binary_cache_state") not in CACHE_VALUES or cache.get("go_build_cache_state") not in CACHE_VALUES:
@@ -239,6 +240,7 @@ def generate(source_path: Path, graph_path: Path, lock_path: Path, spec_path: Pa
         f"- pinned OpenTofu: `{lock['opentofu']['iac_engine']} {lock['opentofu']['iac_engine_version']}`",
         f"- pinned JSON specification SHA-256: `{sha256_file(spec_path)}`",
         "- mutation profile: `READ_ONLY`",
+        "- CLI observation boundary: pinned `version -json`, `validate -json`, plan exit code, and `show -json` only",
         "",
         "## Repository inventory",
         "",
@@ -258,6 +260,7 @@ def generate(source_path: Path, graph_path: Path, lock_path: Path, spec_path: Pa
         "",
         "- `intent.tf.json` contains one built-in `terraform_data.hello` resource and one output.",
         "- No provider installation, cloud access, source checkout, state mutation, apply, destroy, import, or test execution is part of this envelope.",
+        "- Exact before/after observations are absent, so improvement is `UNKNOWN`; a cache hit never counts as test-evidence reuse.",
     ]
     for item in inventory_doc["regular_files"]:
         lines.append(f"- `{item['path']}`: {item['lines']} physical lines, {item['bytes']} bytes")
@@ -315,12 +318,50 @@ def load_oracle(path: Path) -> dict[str, Any]:
     return oracle
 
 
-def plan_receipt(plan_ui: Path, version_json: Path, binary: Path, artifact: Path, oracle_path: Path, lock_path: Path, exit_code: int, output: Path) -> None:
+def show_actions(show: dict[str, Any]) -> tuple[list[dict[str, str]], dict[str, int], int]:
+    changes = show.get("resource_changes")
+    if not isinstance(changes, list):
+        die("OpenTofu show JSON resource_changes is missing")
+    actions: list[dict[str, str]] = []
+    summary = {"add": 0, "change": 0, "forget": 0, "import": 0, "operation": "plan", "remove": 0}
+    for item in changes:
+        if not isinstance(item, dict) or not isinstance(item.get("address"), str):
+            die("OpenTofu show JSON resource change address is missing")
+        change = item.get("change")
+        raw_actions = change.get("actions") if isinstance(change, dict) else None
+        if not isinstance(raw_actions, list) or not all(isinstance(action, str) for action in raw_actions):
+            die("OpenTofu show JSON resource change actions are missing")
+        action_set = tuple(raw_actions)
+        if action_set == ("no-op",):
+            action = "noop"
+        elif action_set == ("create",):
+            action = "create"
+        elif action_set == ("update",):
+            action = "update"
+        elif action_set in (("delete",), ("delete", "create"), ("create", "delete")):
+            action = "delete" if action_set == ("delete",) else "replace"
+        elif action_set == ("read",):
+            action = "read"
+        else:
+            die("OpenTofu show JSON resource change action set is unsupported")
+        actions.append({"address": item["address"], "action": action})
+        if action == "create":
+            summary["add"] += 1
+        elif action == "delete":
+            summary["remove"] += 1
+        elif action != "noop":
+            summary["change"] += 1
+    drift = show.get("resource_drift", [])
+    if not isinstance(drift, list):
+        die("OpenTofu show JSON resource_drift is malformed")
+    return sorted(actions, key=lambda item: (item["address"], item["action"])), summary, len(drift)
+
+
+def plan_receipt(plan_show: Path, version_json: Path, binary: Path, artifact: Path, oracle_path: Path, lock_path: Path, exit_code: int, output: Path) -> None:
     lock = release_lock(lock_path)
     oracle = load_oracle(oracle_path)
-    messages = read_jsonl(plan_ui)
+    show = read_json(plan_show)
     version = read_json(version_json)
-    ui = messages[0].get("ui")
     receipt: dict[str, Any] = {
         "schema": "gooo/opentofu-envelope/plan-receipt/v1",
         "state": "UNKNOWN",
@@ -330,13 +371,13 @@ def plan_receipt(plan_ui: Path, version_json: Path, binary: Path, artifact: Path
         "binary_sha256": sha256_file(binary),
         "version_json_sha256": sha256_file(version_json),
         "version_json": version,
-        "ui_version": ui,
+        "show_json_sha256": sha256_file(plan_show),
+        "show_format_version": show.get("format_version"),
         "exit_code": exit_code,
-        "stdout_sha256": sha256_file(plan_ui),
         "input_artifact_sha256": sha256_file(artifact),
         "oracle_sha256": sha256_file(oracle_path),
         "release_lock_sha256": sha256_file(lock_path),
-        "command_sha256": sha256_value(lock["opentofu"]["plan_command"]),
+        "command_sha256": sha256_value({"plan": lock["opentofu"]["plan_command"], "show": lock["opentofu"]["show_command"], "validate": lock["opentofu"]["validate_command"]}),
         "resource_actions": [],
         "change_summary": None,
         "drift_count": 0,
@@ -350,33 +391,20 @@ def plan_receipt(plan_ui: Path, version_json: Path, binary: Path, artifact: Path
     }
     if receipt["binary_sha256"] != lock["opentofu"]["binary_sha256"]:
         receipt["unknown"] = unknown_claim("ENGINE", "VERIFY_BINARY_DIGEST", "BINARY_DIGEST_DOES_NOT_MATCH_RELEASE_LOCK", "OBSERVATION_UNAVAILABLE", "REACQUIRE_PINNED_OPENTOFU_ASSET")
-    elif messages[0].get("type") != "version":
-        receipt["unknown"] = unknown_claim("PLAN", "READ_PLAN_VERSION", "PLAN_VERSION_MESSAGE_MISSING", "OBSERVATION_UNAVAILABLE", "CAPTURE_VERSION_MESSAGE")
-    elif not isinstance(ui, str) or not ui.startswith("1."):
-        receipt["unknown"] = unknown_claim("PLAN", "READ_PLAN_JSON_UI", "UNSUPPORTED_JSON_UI_MAJOR", "OBSERVATION_UNAVAILABLE", "PIN_SUPPORTED_PLAN_JSON_UI_MAJOR")
+    elif version.get("terraform_version") != lock["opentofu"]["iac_engine_version"]:
+        receipt["unknown"] = unknown_claim("ENGINE", "READ_VERSION_JSON", "VERSION_JSON_DOES_NOT_MATCH_RELEASE_LOCK", "OBSERVATION_UNAVAILABLE", "CAPTURE_PINNED_VERSION_JSON")
+    elif not isinstance(show.get("format_version"), str) or not show["format_version"].startswith("1."):
+        receipt["unknown"] = unknown_claim("PLAN", "READ_PLAN_SHOW_JSON", "UNSUPPORTED_SHOW_JSON_FORMAT_MAJOR", "OBSERVATION_UNAVAILABLE", "PIN_SUPPORTED_SHOW_JSON_FORMAT")
     elif exit_code not in (0, 2):
         receipt["unknown"] = unknown_claim("PLAN", "READ_PLAN_EXIT_CODE", "PLAN_EXIT_CODE_NOT_0_OR_2", "OBSERVATION_UNAVAILABLE", "CAPTURE_SUCCESSFUL_READ_ONLY_PLAN")
     else:
-        actions = []
-        summary = None
-        drift_count = 0
-        for message in messages:
-            if message.get("type") == "planned_change":
-                change = message.get("change", {})
-                resource = change.get("resource", {}) if isinstance(change, dict) else {}
-                address = resource.get("addr") if isinstance(resource, dict) else None
-                action = change.get("action") if isinstance(change, dict) else None
-                if not isinstance(address, str) or action not in PLAN_ACTIONS:
-                    receipt["unknown"] = unknown_claim("PLAN", "READ_PLANNED_CHANGE", "UNSUPPORTED_PLANNED_CHANGE_SHAPE", "OBSERVATION_UNAVAILABLE", "PIN_SUPPORTED_PLAN_JSON_UI")
-                    break
-                actions.append({"address": address, "action": action})
-            elif message.get("type") == "resource_drift":
-                drift_count += 1
-            elif message.get("type") == "change_summary":
-                summary = message.get("changes")
+        try:
+            actions, summary, drift_count = show_actions(show)
+        except SystemExit:
+            receipt["unknown"] = unknown_claim("PLAN", "READ_PLAN_SHOW_JSON", "UNSUPPORTED_PLAN_SHOW_JSON_SHAPE", "OBSERVATION_UNAVAILABLE", "PIN_SUPPORTED_PLAN_SHOW_JSON")
         else:
             receipt["state"] = "CLOSED"
-            receipt["resource_actions"] = sorted(actions, key=lambda item: (item["address"], item["action"]))
+            receipt["resource_actions"] = actions
             receipt["change_summary"] = summary
             receipt["drift_count"] = drift_count
     write_json(output, receipt)
@@ -448,7 +476,15 @@ def evaluate_cases(plan_match_path: Path, bindings_path: Path, output: Path) -> 
         cases.append({"case_id": case_id, "class": "refuted", "decision": "FAIL_CLOSED", "claims": [full], "precedence": "REFUTED_OVER_UNKNOWN", "resolution": "EXACT"})
     if sum(case["class"] == "normal" for case in cases) != 3 or sum(case["class"] == "unknown" for case in cases) != 3 or sum(case["class"] == "refuted" for case in cases) != 3:
         die("canonical case denominator is not 3/3/3")
-    write_json(output, {"schema": "gooo/opentofu-envelope/cases/v1", "state": "CLOSED", "case_count": len(cases), "cases": cases})
+    write_json(output, {
+        "schema": "gooo/opentofu-envelope/cases/v1",
+        "state": "CLOSED",
+        "state_precedence": ["REFUTED", "UNKNOWN", "CLOSED"],
+        "precedence_rule": "REFUTED > UNKNOWN > CLOSED",
+        "outcome_counts": {"CLOSED": 3, "UNKNOWN": 3, "REFUTED": 3},
+        "case_count": len(cases),
+        "cases": cases,
+    })
 
 
 def replay(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path, bindings: Path, denominator: Path, inventory_path: Path, output: Path) -> None:
@@ -468,7 +504,7 @@ def producer(source: Path, graph: Path, artifact: str, evaluator: str) -> dict[s
     return {"source": str(source), "ir": str(graph), "generated_artifact": artifact, "evaluator": evaluator}
 
 
-def record(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path, bindings_path: Path, denominator_path: Path, inventory_path: Path, validation_path: Path, receipt_path: Path, match_path: Path, oracle_path: Path, cases_path: Path, replay_path: Path, measurements_path: Path, output: Path) -> None:
+def record(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path, bindings_path: Path, denominator_path: Path, inventory_path: Path, validation_path: Path, receipt_path: Path, match_path: Path, oracle_path: Path, cases_path: Path, replay_path: Path, measurements_path: Path, go_version_path: Path, output: Path) -> None:
     lock_doc = release_lock(lock)
     denominator = contract(denominator_path)
     bindings = read_json(bindings_path)
@@ -484,8 +520,10 @@ def record(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path,
     measurements = read_json(measurements_path)
     if receipt.get("state") != "CLOSED" or match.get("state") != "CLOSED" or validation.get("state") != "CLOSED" or replay_doc.get("state") != "CLOSED":
         die("record requires closed validation, plan match, and replay")
-    if cases.get("case_count") != 9 or len(cases.get("cases", [])) != 9:
+    if cases.get("case_count") != 9 or len(cases.get("cases", [])) != 9 or cases.get("state_precedence") != ["REFUTED", "UNKNOWN", "CLOSED"] or cases.get("precedence_rule") != "REFUTED > UNKNOWN > CLOSED":
         die("record requires exactly 9 canonical cases")
+    if cases.get("outcome_counts") != {"CLOSED": 3, "UNKNOWN": 3, "REFUTED": 3}:
+        die("canonical case outcome counts are not 3/3/3")
     for stage in measurements:
         if stage.get("execution_state") not in EXECUTION_VALUES or stage.get("cache_state") not in CACHE_VALUES or stage.get("runner_persistence") not in PERSISTENCE_VALUES or stage.get("prior_test_evidence_reuse_state") not in REUSE_VALUES:
             die("measurement enum value is invalid")
@@ -495,10 +533,16 @@ def record(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path,
     for required in ("build", "test", "conformance"):
         if required not in by_stage:
             die(f"missing {required} measurement")
+    try:
+        go_version = go_version_path.read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        die(f"cannot read Go version evidence {go_version_path}: {exc}")
+    if not go_version.startswith("go version go1.27"):
+        die("Go version evidence is not Go 1.27")
     reuse_key = {
         "source_digest": sha256_file(source),
         "toolchain_digest": sha256_value({"gooo_release": lock_doc["gooo"]["asset"]["sha256"], "opentofu_binary": lock_doc["opentofu"]["binary_sha256"]}),
-        "command_digest": sha256_value({"plan": lock_doc["opentofu"]["plan_command"], "validate": lock_doc["opentofu"]["validate_command"]}),
+        "command_digest": sha256_value({"plan": lock_doc["opentofu"]["plan_command"], "show": lock_doc["opentofu"]["show_command"], "validate": lock_doc["opentofu"]["validate_command"]}),
         "config_digest": sha256_file(lock),
         "dependency_digest": sha256_value({"json_spec": sha256_file(spec), "python": sys.version.split()[0]}),
         "provider_lock_digest": sha256_value({"provider_lock": "ABSENT_FOR_BUILTIN_TERRAFORM_DATA"}),
@@ -540,13 +584,24 @@ def record(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path,
         metric("gooo_physical_files", inventory_doc["gooo_physical_files"], "files", "DeclareGoooInfrastructureIntent", "main.gooo"),
         metric("gooo_physical_lines", inventory_doc["gooo_physical_lines"], "lines", "DeclareGoooInfrastructureIntent", "main.gooo"),
     ]
+    improvement_claim = unknown_claim(
+        "IMPROVEMENT",
+        "COMPARE_EXACT_BEFORE_AFTER",
+        "EXACT_BEFORE_AFTER_PAIR_MISSING",
+        "DIRECT_MISSING",
+        "CAPTURE_EXACT_BEFORE_AFTER_PAIR",
+        ["BEFORE_EXACT_OBSERVATION", "AFTER_EXACT_OBSERVATION"],
+    )
     primary = []
     for cell in denominator["cells"]:
         primary.append({"metric_id": f"cell-metric-{cell['ordinal']:02d}", "cell_id": cell["id"], "activity": cell["activity"], "activity_id": activity_ids[cell["activity"]], "value": "CLOSED", "unit": "cell-state", "producer": producer(source, graph, "observation.json", "scripts/envelope.py:record")})
     output_doc = {
         "schema": "gooo/opentofu-envelope/observation/v1",
         "state": "CLOSED",
+        "state_precedence": ["REFUTED", "UNKNOWN", "CLOSED"],
+        "precedence_rule": "REFUTED > UNKNOWN > CLOSED",
         "subject": {"source_sha256": sha256_file(source), "graph_sha256": sha256_file(graph), "release_lock_sha256": sha256_file(lock)},
+        "toolchain": {"go_requirement": "1.27.x", "go_version_evidence": go_version},
         "user_path": {
             "step_count": denominator["expected_user_path_steps"],
             "activities": [
@@ -561,15 +616,22 @@ def record(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path,
         "metrics": metrics,
         "primary_metrics": primary,
         "verification_stages": measurements,
+        "improvement": {
+            "state": "UNKNOWN",
+            "claim": improvement_claim,
+            "before": None,
+            "after": None,
+            "cache_hit_is_not_reuse": True,
+        },
         "cases": cases,
         "validation": validation,
         "plan_receipt": receipt,
         "plan_match": match,
         "plan_oracle": {"sha256": sha256_file(oracle_path), "resource_actions": oracle["resource_actions"], "side_effects": oracle["side_effects"]},
-        "identity": {"source_sha256": sha256_file(source), "graph_sha256": sha256_file(graph), "artifact_sha256": sha256_file(publish_dir / "intent.tf.json"), "dossier_sha256": sha256_file(publish_dir / "dossier.md"), "plan_receipt_sha256": sha256_file(receipt_path), "plan_match_sha256": sha256_file(match_path), "oracle_sha256": sha256_file(oracle_path), "binary_sha256": receipt["binary_sha256"], "version_json_sha256": receipt["version_json_sha256"]},
+        "identity": {"source_sha256": sha256_file(source), "graph_sha256": sha256_file(graph), "artifact_sha256": sha256_file(publish_dir / "intent.tf.json"), "dossier_sha256": sha256_file(publish_dir / "dossier.md"), "plan_receipt_sha256": sha256_file(receipt_path), "plan_match_sha256": sha256_file(match_path), "oracle_sha256": sha256_file(oracle_path), "binary_sha256": receipt["binary_sha256"], "version_json_sha256": receipt["version_json_sha256"], "show_json_sha256": receipt["show_json_sha256"]},
         "reuse_contract": {"installation_binary_cache_state": lock_doc["cache_contract"]["installation_binary_cache_state"], "go_build_cache_state": lock_doc["cache_contract"]["go_build_cache_state"], "prior_test_evidence_reuse_state": lock_doc["cache_contract"]["prior_test_evidence_reuse_state"], "runner_persistence": lock_doc["cache_contract"]["runner_persistence"], "reuse_key": reuse_key},
         "authority": lock_doc["authority"],
-        "official_inputs": {"gooo_release": lock_doc["gooo"], "opentofu_release": lock_doc["opentofu"], "json_spec_sha256": sha256_file(spec)},
+        "official_inputs": {"gooo_release": lock_doc["gooo"], "opentofu_release": lock_doc["opentofu"], "json_spec_sha256": sha256_file(spec), "go_version_evidence": go_version},
         "replay": replay_doc,
     }
     write_json(output, output_doc)
@@ -592,7 +654,7 @@ def parser() -> argparse.ArgumentParser:
         command.add_argument(f"--{name}", type=Path, required=True)
 
     command = sub.add_parser("plan-receipt")
-    for name in ("plan-ui", "version-json", "binary", "artifact", "oracle", "lock", "output"):
+    for name in ("plan-show", "version-json", "binary", "artifact", "oracle", "lock", "output"):
         command.add_argument(f"--{name}", type=Path, required=True)
     command.add_argument("--exit-code", type=int, required=True)
 
@@ -614,7 +676,7 @@ def parser() -> argparse.ArgumentParser:
     command.add_argument("--output", type=Path, required=True)
 
     command = sub.add_parser("record")
-    for name in ("publish-dir", "source", "graph", "lock", "spec", "bindings", "denominator", "inventory", "validation", "receipt", "match", "oracle", "cases", "replay", "measurements", "output"):
+    for name in ("publish-dir", "source", "graph", "lock", "spec", "bindings", "denominator", "inventory", "validation", "receipt", "match", "oracle", "cases", "replay", "measurements", "go-version", "output"):
         command.add_argument(f"--{name}", type=Path, required=True)
     return root
 
@@ -628,7 +690,7 @@ def main() -> None:
     elif args.command == "generate":
         generate(args.source, args.graph, args.lock, args.spec, args.bindings, args.denominator, args.inventory, args.output_dir)
     elif args.command == "plan-receipt":
-        plan_receipt(args.plan_ui, args.version_json, args.binary, args.artifact, args.oracle, args.lock, args.exit_code, args.output)
+        plan_receipt(args.plan_show, args.version_json, args.binary, args.artifact, args.oracle, args.lock, args.exit_code, args.output)
     elif args.command == "match-plan":
         match_plan(args.artifact, args.receipt, args.oracle, args.output)
     elif args.command == "cases":
@@ -640,7 +702,7 @@ def main() -> None:
         valid = tofu.get("valid") is True and (tofu.get("error_count") in (None, 0))
         write_json(args.output, {"schema": "gooo/opentofu-envelope/validation/v1", "state": "CLOSED" if valid else "REFUTED", "artifact_sha256": sha256_file(args.artifact), "official_opentofu": tofu, "structural_checks": {"output_file_count": 2}})
     elif args.command == "record":
-        record(args.publish_dir, args.source, args.graph, args.lock, args.spec, args.bindings, args.denominator, args.inventory, args.validation, args.receipt, args.match, args.oracle, args.cases, args.replay, args.measurements, args.output)
+        record(args.publish_dir, args.source, args.graph, args.lock, args.spec, args.bindings, args.denominator, args.inventory, args.validation, args.receipt, args.match, args.oracle, args.cases, args.replay, args.measurements, args.go_version, args.output)
 
 
 if __name__ == "__main__":

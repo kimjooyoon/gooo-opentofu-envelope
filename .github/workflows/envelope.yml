@@ -136,7 +136,7 @@ jobs:
           end_ns=$(date +%s%N)
           echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/bind-wall-ms"
           python3 scripts/envelope.py bind --source examples/intent/main.gooo --graph "$WORK_DIR/graph.json" --denominator contracts/envelope-v1.json --output "$WORK_DIR/bindings.json"
-          jq -e '.state=="CLOSED" and .activity_count==12 and .binding_edges==14 and (.bindings|length)==12' "$WORK_DIR/bindings.json" >/dev/null
+          jq -e '.state=="CLOSED" and .activity_count==12 and .binding_edges==14 and (.bindings|length)==12 and .semantic_authority.state=="CLOSED" and .semantic_authority.source=="GOOO_SOURCE_AUTHORITATIVE" and .semantic_authority.ir=="GOOO_SEMANTIC_IR_AUTHORITATIVE" and .semantic_authority.graph=="DERIVED_FROM_RELEASED_IR"' "$WORK_DIR/bindings.json" >/dev/null
 
       - name: Record repository inventory
         shell: bash
@@ -248,12 +248,13 @@ jobs:
               {stage:"test",wall_ms:$cases_wall,peak_rss_kib:$cases_rss,count:9,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:9,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0},
               {stage:"conformance",wall_ms:($validate_wall+$receipt_wall+$match_wall+$replay_wall),peak_rss_kib:([$validate_rss,$receipt_rss,$match_rss,$replay_rss]|max),count:4,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:0,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0}
             ]' > "$WORK_DIR/measurements.json"
+          git status --porcelain=v1 > "$WORK_DIR/repository-status.txt"
           python3 scripts/envelope.py record \
             --publish-dir "$PUBLISH_DIR" --source examples/intent/main.gooo --graph "$WORK_DIR/graph.json" --lock contracts/release-lock-v1.json \
             --spec "$WORK_DIR/opentofu-json-spec.mdx" --bindings "$WORK_DIR/bindings.json" --denominator contracts/envelope-v1.json \
             --inventory "$WORK_DIR/inventory.json" --validation "$WORK_DIR/validation.json" --receipt "$PUBLISH_DIR/contract-receipt.json" \
             --match "$WORK_DIR/semantic-oracle-match.json" --oracle fixtures/service-contract-oracle-v1.json --cases "$WORK_DIR/cases.json" --replay "$WORK_DIR/replay.json" \
-            --measurements "$WORK_DIR/measurements.json" --go-version "$WORK_DIR/go-version.txt" --output "$EVIDENCE_DIR/observation.json"
+            --measurements "$WORK_DIR/measurements.json" --go-version "$WORK_DIR/go-version.txt" --repository-status "$WORK_DIR/repository-status.txt" --output "$EVIDENCE_DIR/observation.json"
           cp "$PUBLISH_DIR/main.tf.json" "$EVIDENCE_DIR/main.tf.json"
           cp "$PUBLISH_DIR/contract-receipt.json" "$EVIDENCE_DIR/contract-receipt.json"
           cp "$PUBLISH_DIR/dossier.md" "$EVIDENCE_DIR/dossier.md"
@@ -268,17 +269,27 @@ jobs:
           cp fixtures/service-contract-oracle-v1.json "$EVIDENCE_DIR/service-contract-oracle-v1.json"
           cp "$WORK_DIR/cases.json" "$EVIDENCE_DIR/cases.json"
           cp "$WORK_DIR/replay.json" "$EVIDENCE_DIR/replay.json"
+          cp "$WORK_DIR/repository-status.txt" "$EVIDENCE_DIR/repository-status.txt"
           cp contracts/envelope-v1.json "$EVIDENCE_DIR/envelope-v1.json"
           cp contracts/release-lock-v1.json "$EVIDENCE_DIR/release-lock-v1.json"
           jq -e '
             .state=="CLOSED" and
+            .semantic_authority.state=="CLOSED" and
+            .core_authority.state=="CLOSED" and
+            (.core_authority.evidence|length)==3 and
             (.primary_metrics|length)==12 and
             (.metrics|length)==25 and
             (.metrics|all(.[]; (.activity_id|type)=="string" and (.producer|keys|length)==6)) and
             .generated_outputs.file_count==3 and
+            (.repository_inventory.file_count|type)=="number" and
+            (.repository_inventory.subfolder_count|type)=="number" and
+            .test_counts=={total:9,executed:9,reused:0,skipped:0,not_observed:0} and
+            .mutation_counts=={repository_writes:0,network:0,provider_install:0,infrastructure:0,state:0,external_mutations:0} and
             .cases.case_count==9 and
             .cases.state_precedence==["REFUTED","UNKNOWN","CLOSED"] and
             .improvement.state=="UNKNOWN" and
+            .utility.state=="UNKNOWN" and
+            (.utility.claim|(.stage and .step and .reason and .unknown_class and .next_operation and (.blocked_by|type=="array"))) and
             .improvement.cache_hit_is_not_reuse==true and
             .semantic_oracle_match.state=="CLOSED" and
             .contract_receipt.validation_exit_code==0 and
@@ -318,9 +329,12 @@ jobs:
             echo "- conformance: $conformance"
             echo "- Go toolchain: $(jq -r '.toolchain.go_version_evidence' "$observation")"
             echo "- generated artifact files / bytes: $(jq -r '.generated_outputs.file_count' "$observation") / $(jq -r '.generated_outputs.bytes' "$observation")"
+            echo "- repository files / subfolders: $(jq -r '.repository_inventory.file_count' "$observation") / $(jq -r '.repository_inventory.subfolder_count' "$observation")"
+            echo "- Go files / physical lines: $(jq -r '.repository_inventory.go_files' "$observation") / $(jq -r '.repository_inventory.go_physical_lines' "$observation")"
+            echo "- Gooo files / physical lines: $(jq -r '.repository_inventory.gooo_files' "$observation") / $(jq -r '.repository_inventory.gooo_physical_lines' "$observation")"
             echo "- OpenTofu: $(jq -r '.contract_receipt.iac_engine + " " + .contract_receipt.engine_version + ", exit_code=" + (.contract_receipt.validation_exit_code|tostring) + ", diagnostics=" + (.contract_receipt.diagnostics.error_count|tostring) + "/" + (.contract_receipt.diagnostics.warning_count|tostring)' "$observation")"
             echo "- semantic relations: $(jq -r '.semantic_oracle_match.semantic_relation_count' "$observation")"
             echo "- improvement: $(jq -r '.improvement.state + " (" + .improvement.claim.reason + ")"' "$observation")"
-            echo "- repository_writes / infrastructure_mutations / provider-install attempts: $(jq -r '[.authority.repository_writes, (.metrics[]|select(.name=="infrastructure_mutations")|.value), (.metrics[]|select(.name=="network_provider_install_attempts")|.value)] | join(" / ")' "$observation")"
+            echo "- repository_writes / external_mutations: $(jq -r '[.mutation_counts.repository_writes, .mutation_counts.external_mutations] | join(" / ")' "$observation")"
             echo "- artifact digest: ${{ steps.evidence.outputs.artifact-digest }}"
           } >> "$GITHUB_STEP_SUMMARY"

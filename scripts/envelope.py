@@ -278,9 +278,9 @@ def graph_model(graph: dict[str, Any], source_path: Path) -> dict[str, Any]:
         relation_keys.add(key)
         if status != "deterministic":
             continue
-        if predicate == "used" and subject in result and obj in name_by_id and name_by_id[obj] in ENTITY_NAMES:
+        if predicate == "used" and subject in name_by_id and name_by_id[subject] in ACTIVITIES and obj in name_by_id and name_by_id[obj] in ENTITY_NAMES:
             inputs[name_by_id[subject]].add(name_by_id[obj])
-        elif predicate == "wasGeneratedBy" and obj in result and subject in name_by_id and name_by_id[subject] in ENTITY_NAMES:
+        elif predicate == "wasGeneratedBy" and obj in name_by_id and name_by_id[obj] in ACTIVITIES and subject in name_by_id and name_by_id[subject] in ENTITY_NAMES:
             outputs[name_by_id[obj]].add(name_by_id[subject])
     for activity in ACTIVITIES:
         if inputs[activity] != ACTIVITY_INPUTS[activity] or outputs[activity] != ACTIVITY_OUTPUTS[activity]:

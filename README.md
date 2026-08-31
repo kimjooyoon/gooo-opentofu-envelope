@@ -55,22 +55,27 @@ is `CLOSED` only when the released Gooo IR, pinned OpenTofu JSON validation, and
 independent service oracle all provide evidence; utility remains explicitly
 unclosed until a before/after user observation exists.
 
-## v0.1.4 durable release evidence
+## v0.1.3 -> v0.1.4 -> v0.1.5 release evidence
 
-The v0.1.3 release is intentionally preserved as a counterexample: its release
-is immutable and has zero release assets. The v0.1.4 release contract records
-that predecessor release ID (`379957493`), `asset_count_before=0`, and
-`asset_count_after=4`; it does not rewrite or delete v0.1.3.
+The v0.1.3 release is intentionally preserved as the immutable zero-asset
+predecessor (`release_id=379957493`, `asset_count=0`). The annotated v0.1.4
+tag is also preserved as a failed-trigger counterexample: its target is the
+v0.1.3 follow-up merge commit, its release is absent, and its tag-triggered
+workflow runs failed before any job started. Neither the tag nor v0.1.3 is
+rewritten or deleted. Its annotated tag object is
+`074d8c01282f20efb55460a69a5177a378878f90` -> target commit
+`480e23a159b533be23811667b68b09562ad4c4f8`; failed trigger run IDs are
+`33429443119`, `33429524144`, and `33429601185`.
 
-The tag-only release workflow consumes the successful main CI evidence artifact
-whose head SHA and observation source digest are identical to the annotated
-`v0.1.4` tag target. It packages the existing read-only evidence for the
-released Gooo graph -> `main.tf.json` -> pinned OpenTofu `validate -json` ->
+The tag-only v0.1.5 release workflow consumes the successful main CI evidence
+artifact whose head SHA and observation source digest are identical to the
+annotated v0.1.5 tag target. It packages the existing read-only evidence for
+the released Gooo graph -> `main.tf.json` -> pinned OpenTofu `validate -json` ->
 independent service oracle path. In caller-owned temporary storage it creates
-exactly these four assets: `evidence-v0.1.4.tar.gz`,
-`manifest-v0.1.4.json`, `SHA256SUMS`, and `source-v0.1.4.tar.gz`.
+exactly these four assets: `evidence-v0.1.5.tar.gz`,
+`manifest-v0.1.5.json`, `SHA256SUMS`, and `source-v0.1.5.tar.gz`.
 
-The workflow publishes the release only after all four assets are present, then
+The workflow publishes v0.1.5 only after all four assets are present, then
 checks the server-reported size and digest for every asset and verifies the
 digest of every actual download. The manifest scopes `CLOSED` to this Gooo
 semantic graph authority, leaves external utility `UNKNOWN`, and makes no

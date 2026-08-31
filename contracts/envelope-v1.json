@@ -3,19 +3,19 @@
   "version": 1,
   "target_cells": 12,
   "expected_user_path_steps": 5,
-  "expected_output_files": ["dossier.md", "intent.tf.json"],
+  "expected_output_files": ["contract-receipt.json", "dossier.md", "main.tf.json"],
   "cells": [
-    {"ordinal": 1, "id": "INTENT_DECLARED", "activity": "DeclareGoooInfrastructureIntent", "stage": "INPUT", "step": "DECLARE_GOOO_INFRASTRUCTURE_INTENT", "proof_family": "FOUNDATION", "indicator": "DRIVER", "depends_on": []},
-    {"ordinal": 2, "id": "GOOO_GRAPH_BOUND", "activity": "BindGoooIntentToOpenTofu", "stage": "META", "step": "BIND_RELEASED_GOOO_GRAPH", "proof_family": "FOUNDATION", "indicator": "DRIVER", "depends_on": ["INTENT_DECLARED"]},
+    {"ordinal": 1, "id": "CONTRACT_DECLARED", "activity": "DeclareGoooInfrastructureIntent", "stage": "INPUT", "step": "DECLARE_SERVICE_INFRASTRUCTURE_CONTRACT", "proof_family": "FOUNDATION", "indicator": "DRIVER", "depends_on": []},
+    {"ordinal": 2, "id": "GOOO_GRAPH_BOUND", "activity": "BindGoooIntentToOpenTofu", "stage": "META", "step": "BIND_RELEASED_GOOO_SERVICE_GRAPH", "proof_family": "FOUNDATION", "indicator": "DRIVER", "depends_on": ["CONTRACT_DECLARED"]},
     {"ordinal": 3, "id": "OPENTOFU_SPEC_INPUT", "activity": "ConsumePinnedOpenTofuJSONSpec", "stage": "SPEC", "step": "CONSUME_PINNED_OPENTOFU_JSON_SPEC", "proof_family": "FOUNDATION", "indicator": "DRIVER", "depends_on": ["GOOO_GRAPH_BOUND"]},
-    {"ordinal": 4, "id": "ARTIFACT_GENERATED", "activity": "GenerateOpenTofuCompatibleArtifact", "stage": "GENERATION", "step": "GENERATE_DETERMINISTIC_TF_JSON", "proof_family": "FOUNDATION", "indicator": "DRIVER", "depends_on": ["OPENTOFU_SPEC_INPUT"]},
+    {"ordinal": 4, "id": "ARTIFACT_GENERATED", "activity": "GenerateOpenTofuCompatibleArtifact", "stage": "GENERATION", "step": "GENERATE_MAIN_TF_JSON", "proof_family": "FOUNDATION", "indicator": "DRIVER", "depends_on": ["OPENTOFU_SPEC_INPUT"]},
     {"ordinal": 5, "id": "DOSSIER_GENERATED", "activity": "GenerateHumanDossier", "stage": "GENERATION", "step": "GENERATE_HUMAN_DOSSIER", "proof_family": "COHERENCE", "indicator": "OUTCOME", "depends_on": ["ARTIFACT_GENERATED"]},
-    {"ordinal": 6, "id": "OUTPUTS_VERIFIED", "activity": "VerifyGeneratedOutputs", "stage": "VALIDATION", "step": "VERIFY_GENERATED_OUTPUTS", "proof_family": "COHERENCE", "indicator": "OUTCOME", "depends_on": ["DOSSIER_GENERATED"]},
-    {"ordinal": 7, "id": "PLAN_RECEIPT_GENERATED", "activity": "GenerateOpenTofuPlanReceipt", "stage": "PLAN", "step": "CAPTURE_PINNED_OPENTOFU_PLAN_RECEIPT", "proof_family": "COHERENCE", "indicator": "OUTCOME", "depends_on": ["OUTPUTS_VERIFIED"]},
-    {"ordinal": 8, "id": "PLAN_INTENT_MATCHED", "activity": "MatchGoooIntentToOpenTofuPlan", "stage": "PLAN", "step": "MATCH_INTENT_RESOURCE_ACTION_SET", "proof_family": "COHERENCE", "indicator": "OUTCOME", "depends_on": ["PLAN_RECEIPT_GENERATED"]},
-    {"ordinal": 9, "id": "UNKNOWN_CASE_PRESERVED", "activity": "PreserveUnknownCase", "stage": "UNKNOWN", "step": "PRESERVE_UNKNOWN_COORDINATES", "proof_family": "REGRESSION", "indicator": "GUARDRAIL", "depends_on": ["PLAN_INTENT_MATCHED"]},
-    {"ordinal": 10, "id": "REFUTED_CASE_CLASSIFIED", "activity": "RefuteContradictionCase", "stage": "REFUTATION", "step": "CLASSIFY_REFUTED_CONTRADICTION", "proof_family": "REGRESSION", "indicator": "GUARDRAIL", "depends_on": ["PLAN_INTENT_MATCHED"]},
+    {"ordinal": 6, "id": "OUTPUTS_VERIFIED", "activity": "VerifyGeneratedOutputs", "stage": "VALIDATION", "step": "VERIFY_GENERATED_CONTRACT_OUTPUTS", "proof_family": "COHERENCE", "indicator": "OUTCOME", "depends_on": ["DOSSIER_GENERATED"]},
+    {"ordinal": 7, "id": "VALIDATION_RECEIPT_GENERATED", "activity": "GenerateOpenTofuValidationReceipt", "stage": "VALIDATION", "step": "CAPTURE_PINNED_OPENTOFU_VALIDATE_RECEIPT", "proof_family": "COHERENCE", "indicator": "OUTCOME", "depends_on": ["OUTPUTS_VERIFIED"]},
+    {"ordinal": 8, "id": "SEMANTIC_ORACLE_MATCHED", "activity": "MatchGoooIntentToIndependentOracle", "stage": "CONFORMANCE", "step": "MATCH_SERVICE_RELATIONS_TO_ORACLE", "proof_family": "COHERENCE", "indicator": "OUTCOME", "depends_on": ["VALIDATION_RECEIPT_GENERATED"]},
+    {"ordinal": 9, "id": "UNKNOWN_CASE_PRESERVED", "activity": "PreserveUnknownCase", "stage": "UNKNOWN", "step": "PRESERVE_UNKNOWN_COORDINATES", "proof_family": "REGRESSION", "indicator": "GUARDRAIL", "depends_on": ["SEMANTIC_ORACLE_MATCHED"]},
+    {"ordinal": 10, "id": "REFUTED_CASE_CLASSIFIED", "activity": "RefuteContradictionCase", "stage": "REFUTATION", "step": "CLASSIFY_TYPE_RELATION_AUTHORITY_CONTRADICTION", "proof_family": "REGRESSION", "indicator": "GUARDRAIL", "depends_on": ["SEMANTIC_ORACLE_MATCHED"]},
     {"ordinal": 11, "id": "REPLAY_VERIFIED", "activity": "VerifyDeterministicReplay", "stage": "REPLAY", "step": "VERIFY_DETERMINISTIC_REPLAY", "proof_family": "REGRESSION", "indicator": "GUARDRAIL", "depends_on": ["OUTPUTS_VERIFIED"]},
-    {"ordinal": 12, "id": "READ_ONLY_BOUNDARY", "activity": "PreserveReadOnlyBoundary", "stage": "AUTHORITY", "step": "PRESERVE_READ_ONLY_BOUNDARY", "proof_family": "REGRESSION", "indicator": "GUARDRAIL", "depends_on": ["UNKNOWN_CASE_PRESERVED", "REFUTED_CASE_CLASSIFIED", "REPLAY_VERIFIED", "PLAN_INTENT_MATCHED"]}
+    {"ordinal": 12, "id": "READ_ONLY_BOUNDARY", "activity": "PreserveReadOnlyBoundary", "stage": "AUTHORITY", "step": "PRESERVE_READ_ONLY_BOUNDARY", "proof_family": "REGRESSION", "indicator": "GUARDRAIL", "depends_on": ["UNKNOWN_CASE_PRESERVED", "REFUTED_CASE_CLASSIFIED", "REPLAY_VERIFIED", "SEMANTIC_ORACLE_MATCHED"]}
   ]
 }

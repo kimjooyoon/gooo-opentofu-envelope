@@ -22,9 +22,7 @@
     "iac_engine_version": "1.12.6",
     "platform": "linux_amd64",
     "binary_sha256": "8f95cbe1523ef7b7913773634a6d6ac94c38f3c8eadba2e18b1e5b01567561ad",
-    "plan_command": ["tofu", "plan", "-refresh=false", "-input=false", "-out", "<caller-owned-temp-plan>", "-detailed-exitcode"],
     "validate_command": ["tofu", "validate", "-json"],
-    "show_command": ["tofu", "show", "-json", "<caller-owned-temp-plan>"],
     "asset": {"id": 520762796, "name": "tofu_1.12.6_linux_amd64.zip", "size": 34644365, "sha256": "5dc43da4f750f33873dc25e94587128709e819e544b7be9016b255316153c3a8"},
     "checksums": {"id": 520762938, "name": "tofu_1.12.6_SHA256SUMS", "size": 3730, "sha256": "6988e0cb8f4e9ebfa3b0999e44841549741b22d9b38873cb5b89074f1cddcb1c"},
     "json_spec": {
@@ -45,8 +43,8 @@
     "opentofu_build_executions": 0,
     "opentofu_init_executions": 0,
     "opentofu_validate_executions": 1,
-    "opentofu_show_executions": 1,
-    "opentofu_plan_executions": 1,
+    "opentofu_show_executions": 0,
+    "opentofu_plan_executions": 0,
     "opentofu_apply_executions": 0,
     "opentofu_destroy_executions": 0,
     "opentofu_import_executions": 0,
@@ -58,6 +56,12 @@
     "opentofu_runtime_network_access_observed": false,
     "product_generation_authorized": false,
     "deployment_execution_authorized": false
+  },
+  "policy": {
+    "default_profile": "READ_ONLY",
+    "authorized_profile": "AUTHORIZED_ACCEPTANCE",
+    "default_forbidden": ["tofu test", "TF_ACC acceptance test"],
+    "authorized_requirements": ["explicit human authorization", "separate credentials", "separate runner policy", "separate evidence schema"]
   },
   "cache_contract": {
     "installation_binary_cache_state": "DISABLED",

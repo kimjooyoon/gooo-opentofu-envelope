@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build a small, read-only Gooo/OpenTofu evidence envelope."""
+"""Build a small, read-only Gooo/OpenTofu service-contract envelope."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -19,7 +20,6 @@ CACHE_VALUES = {"HIT", "MISS", "DISABLED", "UNKNOWN"}
 REUSE_VALUES = {"REUSED", "NOT_REUSED", "INELIGIBLE", "UNKNOWN"}
 PERSISTENCE_VALUES = {"EPHEMERAL", "PERSISTENT", "UNKNOWN"}
 UNKNOWN_FIELDS = {"stage", "step", "reason", "unknown_class", "next_operation", "blocked_by"}
-PLAN_ACTIONS = {"noop", "create", "read", "update", "replace", "delete", "move"}
 REUSE_KEY_FIELDS = [
     "source_digest",
     "toolchain_digest",
@@ -37,8 +37,8 @@ ACTIVITIES = [
     "GenerateOpenTofuCompatibleArtifact",
     "GenerateHumanDossier",
     "VerifyGeneratedOutputs",
-    "GenerateOpenTofuPlanReceipt",
-    "MatchGoooIntentToOpenTofuPlan",
+    "GenerateOpenTofuValidationReceipt",
+    "MatchGoooIntentToIndependentOracle",
     "PreserveUnknownCase",
     "RefuteContradictionCase",
     "VerifyDeterministicReplay",
@@ -91,6 +91,10 @@ def contract(path: Path) -> dict[str, Any]:
         die("denominator must contain exactly 12 cells")
     if {cell.get("activity") for cell in cells} != set(ACTIVITIES):
         die("denominator activity set is not exactly the released 12 activities")
+    expected_cell_fields = {"ordinal", "id", "activity", "stage", "step", "proof_family", "indicator", "depends_on"}
+    for cell in cells:
+        if set(cell) != expected_cell_fields or not isinstance(cell.get("depends_on"), list):
+            die("every cell must have exactly 8 fixed fields")
     for family in ("FOUNDATION", "COHERENCE", "REGRESSION"):
         if sum(cell.get("proof_family") == family for cell in cells) != 4:
             die(f"proof family denominator is not 4 for {family}")
@@ -115,11 +119,14 @@ def release_lock(path: Path) -> dict[str, Any]:
     required_zero = [
         "repository_writes", "local_test_executions", "local_build_executions", "local_formatter_executions",
         "local_vet_executions", "opentofu_source_checkouts", "opentofu_build_executions", "opentofu_init_executions",
-        "opentofu_apply_executions", "opentofu_destroy_executions", "opentofu_import_executions", "opentofu_state_mutations",
-        "opentofu_test_executions", "opentofu_provider_accesses", "opentofu_cloud_accesses",
+        "opentofu_plan_executions", "opentofu_show_executions", "opentofu_apply_executions", "opentofu_destroy_executions",
+        "opentofu_import_executions", "opentofu_state_mutations", "opentofu_test_executions", "opentofu_provider_accesses",
+        "opentofu_cloud_accesses",
     ]
-    if any(authority.get(key) != 0 for key in required_zero) or authority.get("opentofu_validate_executions") != 1 or authority.get("opentofu_plan_executions") != 1 or authority.get("opentofu_show_executions") != 1:
-        die("release lock authority is not read-only")
+    if any(authority.get(key) != 0 for key in required_zero) or authority.get("opentofu_validate_executions") != 1:
+        die("release lock authority is not the read-only validate profile")
+    if authority.get("opentofu_runtime_network_access_claimed") is not False or authority.get("opentofu_runtime_network_access_observed") is not False:
+        die("OpenTofu runtime network authority is not false")
     cache = value.get("cache_contract", {})
     if cache.get("installation_binary_cache_state") not in CACHE_VALUES or cache.get("go_build_cache_state") not in CACHE_VALUES:
         die("binary and Go build cache states are invalid")
@@ -127,6 +134,11 @@ def release_lock(path: Path) -> dict[str, Any]:
         die("prior evidence reuse or runner persistence state is invalid")
     if cache.get("reuse_key_fields") != REUSE_KEY_FIELDS:
         die("reuse key field set is not minimal and exact")
+    policy = value.get("policy", {})
+    if policy.get("default_profile") != "READ_ONLY" or policy.get("authorized_profile") != "AUTHORIZED_ACCEPTANCE":
+        die("policy profiles are not explicit")
+    if policy.get("default_forbidden") != ["tofu test", "TF_ACC acceptance test"]:
+        die("default forbidden acceptance operations are not fixed")
     return value
 
 
@@ -148,10 +160,9 @@ def inventory(root: Path, output: Path) -> None:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError as exc:
                 die(f"cannot read inventory file {path}: {exc}")
-            line_count = len(text.splitlines())
-            files.append({"path": relative, "bytes": path.stat().st_size, "lines": line_count})
+            files.append({"path": relative, "bytes": path.stat().st_size, "lines": len(text.splitlines())})
     files.sort(key=lambda item: item["path"])
-    result = {
+    write_json(output, {
         "schema": "gooo/opentofu-envelope/inventory/v1",
         "root_readme_excluded": True,
         "descendant_directories": directories,
@@ -163,8 +174,7 @@ def inventory(root: Path, output: Path) -> None:
         "go_physical_lines": sum(item["lines"] for item in files if item["path"].endswith(".go")),
         "gooo_physical_files": sum(item["path"].endswith(".gooo") for item in files),
         "gooo_physical_lines": sum(item["lines"] for item in files if item["path"].endswith(".gooo")),
-    }
-    write_json(output, result)
+    })
 
 
 def graph_activities(graph: dict[str, Any]) -> dict[str, str]:
@@ -179,12 +189,10 @@ def graph_activities(graph: dict[str, Any]) -> dict[str, str]:
 
 def bind(source_path: Path, graph_path: Path, denominator_path: Path, output: Path) -> None:
     denominator = contract(denominator_path)
-    source_sha = sha256_file(source_path)
     graph = read_json(graph_path)
     activity_ids = graph_activities(graph)
-    cells = denominator["cells"]
     bindings = []
-    for cell in cells:
+    for cell in denominator["cells"]:
         bindings.append({
             "ordinal": cell["ordinal"],
             "cell_id": cell["id"],
@@ -200,7 +208,7 @@ def bind(source_path: Path, graph_path: Path, denominator_path: Path, output: Pa
     write_json(output, {
         "schema": "gooo/opentofu-envelope/bindings/v1",
         "state": "CLOSED",
-        "source_sha256": source_sha,
+        "source_sha256": sha256_file(source_path),
         "graph_sha256": sha256_file(graph_path),
         "activity_count": len(bindings),
         "binding_edges": sum(len(item["depends_on"]) for item in bindings),
@@ -208,11 +216,62 @@ def bind(source_path: Path, graph_path: Path, denominator_path: Path, output: Pa
     })
 
 
-def generated_artifact() -> dict[str, Any]:
+def service_contract(source_path: Path) -> dict[str, Any]:
+    try:
+        lines = source_path.read_text(encoding="utf-8").splitlines()
+    except OSError as exc:
+        die(f"cannot read Gooo source {source_path}: {exc}")
+    service: dict[str, Any] | None = None
+    environment: dict[str, Any] | None = None
+    required_outputs: list[dict[str, str]] = []
+    relations: list[dict[str, str]] = []
+    for raw in lines:
+        line = raw.strip()
+        match = re.fullmatch(r"// @service name=([A-Za-z0-9_.-]+) type=([A-Za-z0-9_.-]+) port=([0-9]+)", line)
+        if match:
+            if service is not None:
+                die("service contract declares multiple services")
+            service = {"name": match.group(1), "type": match.group(2), "port": int(match.group(3))}
+            continue
+        match = re.fullmatch(r"// @environment name=([A-Za-z0-9_.-]+) type=([A-Za-z0-9_.-]+) value=([A-Za-z0-9_.-]+)", line)
+        if match:
+            if environment is not None:
+                die("service contract declares multiple environments")
+            environment = {"name": match.group(1), "type": match.group(2), "value": match.group(3)}
+            continue
+        match = re.fullmatch(r"// @required_output name=([A-Za-z0-9_.-]+) type=([A-Za-z0-9_.-]+)", line)
+        if match:
+            required_outputs.append({"name": match.group(1), "type": match.group(2)})
+            continue
+        match = re.fullmatch(r"// @relation subject=([A-Za-z0-9_.-]+) predicate=([A-Za-z0-9_.-]+) object=([A-Za-z0-9_.-]+)", line)
+        if match:
+            relations.append({"subject": match.group(1), "predicate": match.group(2), "object": match.group(3)})
+    if service is None or environment is None or len(required_outputs) != 3 or len(relations) != 4:
+        die("Gooo source does not contain the fixed service contract")
+    if len({item["name"] for item in required_outputs}) != 3 or len({json.dumps(item, sort_keys=True) for item in relations}) != 4:
+        die("Gooo service contract contains duplicate outputs or relations")
+    return {"service": service, "environment": environment, "required_outputs": required_outputs, "relations": relations}
+
+
+def generated_artifact(contract_doc: dict[str, Any]) -> dict[str, Any]:
+    service = contract_doc["service"]
+    environment = contract_doc["environment"]
+    required = {item["name"]: item["type"] for item in contract_doc["required_outputs"]}
+    if set(required) != {"service_url", "service_port", "service_type"}:
+        die("required service outputs are not fixed")
     return {
-        "//": "Generated from the Gooo intent; OpenTofu is the pinned configuration authority.",
-        "output": {"hello_id": {"value": "${terraform_data.hello.id}"}},
-        "resource": {"terraform_data": {"hello": {"input": "hello-from-gooo"}}},
+        "//": "Generated from the Gooo service contract; OpenTofu is the pinned validation authority.",
+        "resource": {"terraform_data": {"service_contract": {"input": {
+            "service_name": service["name"],
+            "service_type": service["type"],
+            "service_port": service["port"],
+            "environment": {environment["name"]: environment["value"]},
+        }}}},
+        "output": {
+            "service_url": {"value": "${terraform_data.service_contract.input.service_type}://${terraform_data.service_contract.input.service_name}"},
+            "service_port": {"value": "${terraform_data.service_contract.input.service_port}"},
+            "service_type": {"value": "${terraform_data.service_contract.input.service_type}"},
+        },
     }
 
 
@@ -225,13 +284,23 @@ def generate(source_path: Path, graph_path: Path, lock_path: Path, spec_path: Pa
     if not spec_path.is_file():
         die("pinned OpenTofu JSON specification is missing")
     inventory_doc = read_json(inventory_path)
-    artifact = generated_artifact()
+    contract_doc = service_contract(source_path)
+    artifact = generated_artifact(contract_doc)
     output_dir.mkdir(parents=True, exist_ok=True)
-    write_json(output_dir / "intent.tf.json", artifact)
+    write_json(output_dir / "main.tf.json", artifact)
     lines = [
-        "# Gooo OpenTofu Envelope",
+        "# Gooo OpenTofu Service Contract Envelope",
         "",
-        "This dossier is a deterministic, read-only observation envelope.",
+        "This dossier is a deterministic, read-only service-infrastructure contract observation.",
+        "",
+        "## Service contract",
+        "",
+        f"- service: `{contract_doc['service']['name']}`",
+        f"- type: `{contract_doc['service']['type']}`",
+        f"- port: `{contract_doc['service']['port']}`",
+        f"- environment: `{contract_doc['environment']['name']}={contract_doc['environment']['value']}` ({contract_doc['environment']['type']})",
+        f"- required outputs: `{', '.join(item['name'] for item in contract_doc['required_outputs'])}`",
+        f"- semantic relations: `{len(contract_doc['relations'])}`",
         "",
         "## Authority",
         "",
@@ -240,15 +309,8 @@ def generate(source_path: Path, graph_path: Path, lock_path: Path, spec_path: Pa
         f"- pinned OpenTofu: `{lock['opentofu']['iac_engine']} {lock['opentofu']['iac_engine_version']}`",
         f"- pinned JSON specification SHA-256: `{sha256_file(spec_path)}`",
         "- mutation profile: `READ_ONLY`",
-        "- CLI observation boundary: pinned `version -json`, `validate -json`, plan exit code, and `show -json` only",
-        "",
-        "## Repository inventory",
-        "",
-        f"- descendant directories (root README excluded): `{inventory_doc['descendant_directory_count']}`",
-        f"- regular files (root README excluded): `{inventory_doc['regular_file_count']}`",
-        f"- physical lines including blank/comment lines: `{inventory_doc['physical_line_count']}`",
-        f"- Go files / lines: `{inventory_doc['go_physical_files']} / {inventory_doc['go_physical_lines']}`",
-        f"- Gooo files / lines: `{inventory_doc['gooo_physical_files']} / {inventory_doc['gooo_physical_lines']}`",
+        "- CLI observation boundary: pinned `version -json` and `validate -json` only",
+        "- provider installation, init download, plan, apply, state/backend, credentials, network infrastructure, `tofu test`, and TF_ACC acceptance tests are forbidden in the default profile.",
         "",
         "## Cells",
         "",
@@ -258,9 +320,17 @@ def generate(source_path: Path, graph_path: Path, lock_path: Path, spec_path: Pa
         "",
         "## Artifact",
         "",
-        "- `intent.tf.json` contains one built-in `terraform_data.hello` resource and one output.",
-        "- No provider installation, cloud access, source checkout, state mutation, apply, destroy, import, or test execution is part of this envelope.",
-        "- Exact before/after observations are absent, so improvement is `UNKNOWN`; a cache hit never counts as test-evidence reuse.",
+        "- `main.tf.json` contains one providerless built-in `terraform_data.service_contract` resource and three required outputs.",
+        "- `contract-receipt.json` binds source, released IR, generated JSON, OpenTofu JSON observation, and independent semantic oracle digests.",
+        "- Exact before/after observations are absent, so improvement is `UNKNOWN`; a binary cache hit never counts as test-evidence reuse.",
+        "",
+        "## Repository inventory",
+        "",
+        f"- descendant directories (root README excluded): `{inventory_doc['descendant_directory_count']}`",
+        f"- regular files (root README excluded): `{inventory_doc['regular_file_count']}`",
+        f"- physical lines including blank/comment lines: `{inventory_doc['physical_line_count']}`",
+        f"- Go files / lines: `{inventory_doc['go_physical_files']} / {inventory_doc['go_physical_lines']}`",
+        f"- Gooo files / lines: `{inventory_doc['gooo_physical_files']} / {inventory_doc['gooo_physical_lines']}`",
     ]
     for item in inventory_doc["regular_files"]:
         lines.append(f"- `{item['path']}`: {item['lines']} physical lines, {item['bytes']} bytes")
@@ -270,15 +340,7 @@ def generate(source_path: Path, graph_path: Path, lock_path: Path, spec_path: Pa
 def unknown_claim(stage: str, step: str, reason: str, unknown_class: str, next_operation: str, blocked_by: list[str] | None = None) -> dict[str, Any]:
     if unknown_class not in {"DIRECT_MISSING", "OBSERVATION_UNAVAILABLE"}:
         die("unsupported unknown class")
-    return {
-        "state": "UNKNOWN",
-        "stage": stage,
-        "step": step,
-        "reason": reason,
-        "unknown_class": unknown_class,
-        "next_operation": next_operation,
-        "blocked_by": blocked_by or [],
-    }
+    return {"state": "UNKNOWN", "stage": stage, "step": step, "reason": reason, "unknown_class": unknown_class, "next_operation": next_operation, "blocked_by": blocked_by or []}
 
 
 def refuted_claim(stage: str, step: str, reason: str) -> dict[str, Any]:
@@ -289,83 +351,47 @@ def closed_claim(stage: str, step: str, reason: str) -> dict[str, Any]:
     return {"state": "CLOSED", "stage": stage, "step": step, "reason": reason, "unknown_class": None, "next_operation": None, "blocked_by": []}
 
 
-def read_jsonl(path: Path) -> list[dict[str, Any]]:
-    messages = []
-    for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-        if not line.strip():
-            continue
-        try:
-            value = json.loads(line)
-        except json.JSONDecodeError as exc:
-            die(f"plan JSONL line {number} is malformed: {exc}")
-        if not isinstance(value, dict):
-            die(f"plan JSONL line {number} is not an object")
-        messages.append(value)
-    if not messages:
-        die("plan JSONL is empty")
-    return messages
-
-
-def load_oracle(path: Path) -> dict[str, Any]:
+def load_service_oracle(path: Path) -> dict[str, Any]:
     oracle = read_json(path)
-    expected_summary = {"add": 1, "change": 0, "forget": 0, "import": 0, "operation": "plan", "remove": 0}
-    expected_effects = {"apply": 0, "cloud": 0, "network": 0, "provider": 0, "source_write": 0, "state_mutation": 0}
-    if oracle.get("schema") != "gooo/opentofu-envelope/plan-oracle/v1" or oracle.get("change_summary") != expected_summary or oracle.get("side_effects") != expected_effects:
-        die("plan oracle is not fixed")
-    actions = oracle.get("resource_actions")
-    if actions != [{"address": "terraform_data.hello", "action": "create"}]:
-        die("plan oracle action set is not fixed")
+    if oracle.get("schema") != "gooo/opentofu-envelope/service-contract-oracle/v1" or oracle.get("service") != {"name": "web", "type": "http", "port": 8080}:
+        die("service oracle service identity is not fixed")
+    if oracle.get("environment") != {"name": "APP_ENV", "type": "string", "value": "production"}:
+        die("service oracle environment is not fixed")
+    if oracle.get("required_outputs") != [
+        {"name": "service_url", "type": "string"},
+        {"name": "service_port", "type": "number"},
+        {"name": "service_type", "type": "string"},
+    ]:
+        die("service oracle required outputs are not fixed")
+    if len(oracle.get("relations", [])) != 4 or oracle.get("side_effects") != {"network": 0, "provider_install": 0, "infrastructure_mutation": 0, "state_mutation": 0}:
+        die("service oracle relations or side effects are not fixed")
     return oracle
 
 
-def show_actions(show: dict[str, Any]) -> tuple[list[dict[str, str]], dict[str, int], int]:
-    changes = show.get("resource_changes")
-    if not isinstance(changes, list):
-        die("OpenTofu show JSON resource_changes is missing")
-    actions: list[dict[str, str]] = []
-    summary = {"add": 0, "change": 0, "forget": 0, "import": 0, "operation": "plan", "remove": 0}
-    for item in changes:
-        if not isinstance(item, dict) or not isinstance(item.get("address"), str):
-            die("OpenTofu show JSON resource change address is missing")
-        change = item.get("change")
-        raw_actions = change.get("actions") if isinstance(change, dict) else None
-        if not isinstance(raw_actions, list) or not all(isinstance(action, str) for action in raw_actions):
-            die("OpenTofu show JSON resource change actions are missing")
-        action_set = tuple(raw_actions)
-        if action_set == ("no-op",):
-            action = "noop"
-        elif action_set == ("create",):
-            action = "create"
-        elif action_set == ("update",):
-            action = "update"
-        elif action_set in (("delete",), ("delete", "create"), ("create", "delete")):
-            action = "delete" if action_set == ("delete",) else "replace"
-        elif action_set == ("read",):
-            action = "read"
-        else:
-            die("OpenTofu show JSON resource change action set is unsupported")
-        actions.append({"address": item["address"], "action": action})
-        if action == "create":
-            summary["add"] += 1
-        elif action == "delete":
-            summary["remove"] += 1
-        elif action != "noop":
-            summary["change"] += 1
-    drift = show.get("resource_drift")
-    if drift is None:
-        drift = []
-    if not isinstance(drift, list):
-        die("OpenTofu show JSON resource_drift is malformed")
-    return sorted(actions, key=lambda item: (item["address"], item["action"])), summary, len(drift)
+def validate(tofu_json: Path, artifact: Path, output: Path) -> None:
+    tofu = read_json(tofu_json)
+    valid = tofu.get("valid") is True and tofu.get("error_count", 0) == 0
+    if not isinstance(tofu.get("warning_count", 0), int) or not isinstance(tofu.get("error_count", 0), int):
+        die("OpenTofu validate diagnostics counts must be integers")
+    write_json(output, {
+        "schema": "gooo/opentofu-envelope/validation/v2",
+        "state": "CLOSED" if valid else "REFUTED",
+        "artifact_sha256": sha256_file(artifact),
+        "official_opentofu": tofu,
+        "structural_checks": {"generated_config": "main.tf.json", "providerless": True, "output_file_count_before_receipt": 2},
+        "diagnostics": {"error_count": tofu.get("error_count", 0), "warning_count": tofu.get("warning_count", 0)},
+    })
 
 
-def plan_receipt(plan_show: Path, version_json: Path, binary: Path, artifact: Path, oracle_path: Path, lock_path: Path, exit_code: int, output: Path) -> None:
+def contract_receipt(source: Path, graph: Path, artifact: Path, validation_path: Path, tofu_json: Path, version_json: Path, binary: Path, oracle_path: Path, lock_path: Path, exit_code: int, output: Path) -> None:
     lock = release_lock(lock_path)
-    oracle = load_oracle(oracle_path)
-    show = read_json(plan_show)
+    source_contract = service_contract(source)
+    validation = read_json(validation_path)
     version = read_json(version_json)
+    oracle = load_service_oracle(oracle_path)
+    artifact_doc = read_json(artifact)
     receipt: dict[str, Any] = {
-        "schema": "gooo/opentofu-envelope/plan-receipt/v1",
+        "schema": "gooo/opentofu-envelope/contract-receipt/v1",
         "state": "UNKNOWN",
         "iac_engine": lock["opentofu"]["iac_engine"],
         "engine_version": lock["opentofu"]["iac_engine_version"],
@@ -373,74 +399,102 @@ def plan_receipt(plan_show: Path, version_json: Path, binary: Path, artifact: Pa
         "binary_sha256": sha256_file(binary),
         "version_json_sha256": sha256_file(version_json),
         "version_json": version,
-        "show_json_sha256": sha256_file(plan_show),
-        "show_format_version": show.get("format_version"),
-        "exit_code": exit_code,
+        "validation_json_sha256": sha256_file(tofu_json),
+        "validation_exit_code": exit_code,
+        "validation_command": lock["opentofu"]["validate_command"],
+        "validation_attempted": 1,
+        "validation_executed": 1,
         "input_artifact_sha256": sha256_file(artifact),
-        "oracle_sha256": sha256_file(oracle_path),
         "release_lock_sha256": sha256_file(lock_path),
-        "command_sha256": sha256_value({"plan": lock["opentofu"]["plan_command"], "show": lock["opentofu"]["show_command"], "validate": lock["opentofu"]["validate_command"]}),
-        "resource_actions": [],
-        "change_summary": None,
-        "drift_count": 0,
-        "side_effects": oracle["side_effects"],
+        "json_spec_sha256": lock["opentofu"]["json_spec"]["sha256"],
+        "diagnostics": validation.get("diagnostics", {"error_count": 0, "warning_count": 0}),
+        "semantic_contract": source_contract,
+        "generated_mappings": {
+            "resource": artifact_doc.get("resource", {}).get("terraform_data", {}).get("service_contract"),
+            "outputs": artifact_doc.get("output", {}),
+        },
         "checksum_verification": {
             "release_asset_sha256": lock["opentofu"]["asset"]["sha256"],
             "release_checksums_sha256": lock["opentofu"]["checksums"]["sha256"],
             "binary_matches_lock": sha256_file(binary) == lock["opentofu"]["binary_sha256"],
         },
+        "side_effects": oracle["side_effects"],
+        "provenance": {
+            "source": {"path": str(source), "sha256": sha256_file(source)},
+            "ir": {"path": str(graph), "sha256": sha256_file(graph)},
+            "generated_tf_json": {"path": str(artifact), "sha256": sha256_file(artifact)},
+            "opentofu_observation": {"path": str(tofu_json), "sha256": sha256_file(tofu_json)},
+            "independent_oracle": {"path": str(oracle_path), "sha256": sha256_file(oracle_path)},
+        },
+        "oracle_sha256": sha256_file(oracle_path),
         "unknown": None,
     }
     if receipt["binary_sha256"] != lock["opentofu"]["binary_sha256"]:
         receipt["unknown"] = unknown_claim("ENGINE", "VERIFY_BINARY_DIGEST", "BINARY_DIGEST_DOES_NOT_MATCH_RELEASE_LOCK", "OBSERVATION_UNAVAILABLE", "REACQUIRE_PINNED_OPENTOFU_ASSET")
     elif version.get("terraform_version") != lock["opentofu"]["iac_engine_version"]:
         receipt["unknown"] = unknown_claim("ENGINE", "READ_VERSION_JSON", "VERSION_JSON_DOES_NOT_MATCH_RELEASE_LOCK", "OBSERVATION_UNAVAILABLE", "CAPTURE_PINNED_VERSION_JSON")
-    elif not isinstance(show.get("format_version"), str) or not show["format_version"].startswith("1."):
-        receipt["unknown"] = unknown_claim("PLAN", "READ_PLAN_SHOW_JSON", "UNSUPPORTED_SHOW_JSON_FORMAT_MAJOR", "OBSERVATION_UNAVAILABLE", "PIN_SUPPORTED_SHOW_JSON_FORMAT")
-    elif exit_code not in (0, 2):
-        receipt["unknown"] = unknown_claim("PLAN", "READ_PLAN_EXIT_CODE", "PLAN_EXIT_CODE_NOT_0_OR_2", "OBSERVATION_UNAVAILABLE", "CAPTURE_SUCCESSFUL_READ_ONLY_PLAN")
+    elif exit_code != 0:
+        receipt["unknown"] = unknown_claim("VALIDATION", "READ_VALIDATE_EXIT_CODE", "VALIDATE_EXIT_CODE_IS_NOT_ZERO", "OBSERVATION_UNAVAILABLE", "CAPTURE_SUCCESSFUL_READ_ONLY_VALIDATION")
+    elif validation.get("state") != "CLOSED":
+        receipt["state"] = "REFUTED"
+    elif validation.get("official_opentofu", {}).get("valid") is True:
+        receipt["state"] = "CLOSED"
     else:
-        try:
-            actions, summary, drift_count = show_actions(show)
-        except SystemExit:
-            receipt["unknown"] = unknown_claim("PLAN", "READ_PLAN_SHOW_JSON", "UNSUPPORTED_PLAN_SHOW_JSON_SHAPE", "OBSERVATION_UNAVAILABLE", "PIN_SUPPORTED_PLAN_SHOW_JSON")
-        else:
-            receipt["state"] = "CLOSED"
-            receipt["resource_actions"] = actions
-            receipt["change_summary"] = summary
-            receipt["drift_count"] = drift_count
+        receipt["unknown"] = unknown_claim("VALIDATION", "READ_VALIDATE_JSON", "VALIDATE_JSON_OBSERVATION_UNAVAILABLE", "OBSERVATION_UNAVAILABLE", "CAPTURE_VALIDATE_JSON")
+    if receipt["unknown"] is not None:
+        receipt["state"] = "UNKNOWN"
     write_json(output, receipt)
 
 
-def match_plan(artifact: Path, receipt_path: Path, oracle_path: Path, output: Path) -> None:
+def match_contract(source: Path, graph: Path, artifact: Path, validation_path: Path, tofu_json: Path, receipt_path: Path, oracle_path: Path, output: Path) -> None:
+    source_doc = service_contract(source)
+    oracle = load_service_oracle(oracle_path)
     receipt = read_json(receipt_path)
-    oracle = load_oracle(oracle_path)
-    expected = oracle["resource_actions"]
-    actual = receipt.get("resource_actions", [])
-    if receipt.get("state") != "CLOSED":
-        claim = receipt.get("unknown")
-        if not isinstance(claim, dict) or not UNKNOWN_FIELDS.issubset(claim) or not isinstance(claim.get("blocked_by"), list):
-            claim = unknown_claim("PLAN", "MATCH_PLAN", "PLAN_RECEIPT_NOT_CLOSED", "OBSERVATION_UNAVAILABLE", "CAPTURE_CLOSED_PLAN_RECEIPT")
+    validation = read_json(validation_path)
+    artifact_doc = read_json(artifact)
+    expected_outputs = oracle["required_outputs"]
+    observed_outputs = [{"name": name, "type": next((item["type"] for item in expected_outputs if item["name"] == name), "UNKNOWN"), "value": value.get("value")} for name, value in sorted(artifact_doc.get("output", {}).items())]
+    expected_mapping = {
+        "service_url": "${terraform_data.service_contract.input.service_type}://${terraform_data.service_contract.input.service_name}",
+        "service_port": "${terraform_data.service_contract.input.service_port}",
+        "service_type": "${terraform_data.service_contract.input.service_type}",
+    }
+    observed_mapping = {name: value.get("value") for name, value in artifact_doc.get("output", {}).items()}
+    if receipt.get("state") != "CLOSED" or validation.get("state") != "CLOSED":
+        claim = receipt.get("unknown") if isinstance(receipt.get("unknown"), dict) else unknown_claim("VALIDATION", "MATCH_VALIDATE_OBSERVATION", "OPENTOFU_VALIDATE_JSON_NOT_OBSERVED", "OBSERVATION_UNAVAILABLE", "CAPTURE_PINNED_VALIDATE_JSON", ["OPENTOFU_VALIDATE_JSON"])
+        if not UNKNOWN_FIELDS.issubset(claim) or not isinstance(claim.get("blocked_by"), list):
+            claim = unknown_claim("VALIDATION", "MATCH_VALIDATE_OBSERVATION", "OPENTOFU_VALIDATE_JSON_NOT_OBSERVED", "OBSERVATION_UNAVAILABLE", "CAPTURE_PINNED_VALIDATE_JSON", ["OPENTOFU_VALIDATE_JSON"])
     elif receipt.get("input_artifact_sha256") != sha256_file(artifact):
-        claim = unknown_claim("PLAN", "MATCH_CURRENT_PLAN_INPUT", "STALE_PLAN_INPUT_DIGEST", "DIRECT_MISSING", "REGENERATE_PLAN_FOR_CURRENT_ARTIFACT")
+        claim = unknown_claim("CONFORMANCE", "MATCH_CURRENT_GENERATED_CONFIG", "STALE_GENERATED_CONFIG_DIGEST", "DIRECT_MISSING", "REGENERATE_MAIN_TF_JSON")
     elif receipt.get("iac_engine") != "OPENTOFU" or receipt.get("engine_identity_source") != "PINNED_RELEASE_LOCK":
-        claim = unknown_claim("ENGINE", "BIND_PLAN_ENGINE", "ENGINE_INFERRED_FROM_COMPATIBILITY_FIELD", "DIRECT_MISSING", "CAPTURE_EXPLICIT_OPENTOFU_RELEASE_RECEIPT")
-    elif receipt.get("drift_count") != 0:
-        claim = refuted_claim("PLAN", "REJECT_IGNORED_DRIFT", "PLAN_DRIFT_WAS_NOT_INCLUDED_IN_MATCH")
-    elif actual != expected or receipt.get("change_summary") != oracle["change_summary"]:
-        claim = refuted_claim("PLAN", "MATCH_RESOURCE_ACTION_SET", "GOOO_INTENT_PLAN_RESOURCE_ACTION_CONTRADICTION")
+        claim = unknown_claim("ENGINE", "BIND_VALIDATE_ENGINE", "ENGINE_IDENTITY_NOT_EXPLICITLY_PINNED", "DIRECT_MISSING", "CAPTURE_PINNED_OPENTOFU_VERSION_RECEIPT")
+    elif source_doc["service"] != oracle["service"] or source_doc["environment"] != oracle["environment"] or source_doc["required_outputs"] != expected_outputs or source_doc["relations"] != oracle["relations"]:
+        claim = refuted_claim("CONFORMANCE", "MATCH_SERVICE_CONTRACT_RELATIONS", "GOOO_SERVICE_RELATION_CONTRADICTION")
+    elif observed_mapping != expected_mapping or observed_outputs != [{"name": "service_port", "type": "number", "value": expected_mapping["service_port"]}, {"name": "service_type", "type": "string", "value": expected_mapping["service_type"]}, {"name": "service_url", "type": "string", "value": expected_mapping["service_url"]}]:
+        claim = refuted_claim("CONFORMANCE", "MATCH_REQUIRED_OUTPUT_MAPPING", "GENERATED_REQUIRED_OUTPUT_MAPPING_CONTRADICTION")
+    elif receipt.get("side_effects") != oracle["side_effects"] or receipt.get("validation_exit_code") != 0:
+        claim = refuted_claim("AUTHORITY", "REJECT_SIDE_EFFECT_OR_EXIT_CONTRADICTION", "READ_ONLY_AUTHORITY_CONTRADICTION")
     else:
-        claim = closed_claim("PLAN", "MATCH_RESOURCE_ACTION_SET", "GOOO_INTENT_MATCHES_OPENTOFU_PLAN")
+        claim = closed_claim("CONFORMANCE", "MATCH_SERVICE_CONTRACT_RELATIONS", "GOOO_SERVICE_CONTRACT_MATCHES_GENERATED_JSON_AND_OPENTOFU_VALIDATION")
     write_json(output, {
-        "schema": "gooo/opentofu-envelope/plan-match/v1",
+        "schema": "gooo/opentofu-envelope/semantic-oracle-match/v1",
         "state": claim["state"],
         "claim": claim,
-        "artifact_sha256": sha256_file(artifact),
-        "plan_receipt_sha256": sha256_file(receipt_path),
-        "oracle_sha256": sha256_file(oracle_path),
-        "expected_resource_actions": expected,
-        "observed_resource_actions": actual,
-        "resource_action_count": len(actual),
+        "provenance": {
+            "source": {"path": str(source), "sha256": sha256_file(source)},
+            "ir": {"path": str(graph), "sha256": sha256_file(graph)},
+            "generated_tf_json": {"path": str(artifact), "sha256": sha256_file(artifact)},
+            "opentofu_observation": {"path": str(tofu_json), "sha256": sha256_file(tofu_json)},
+            "independent_oracle": {"path": str(oracle_path), "sha256": sha256_file(oracle_path)},
+        },
+        "contract_receipt_sha256": sha256_file(receipt_path),
+        "expected_service": oracle["service"],
+        "observed_service": source_doc["service"],
+        "expected_required_outputs": expected_outputs,
+        "observed_required_outputs": observed_outputs,
+        "expected_output_mapping": expected_mapping,
+        "observed_output_mapping": observed_mapping,
+        "semantic_relation_count": len(source_doc["relations"]),
     })
 
 
@@ -448,38 +502,38 @@ def attach_activity(claim: dict[str, Any], activity: str, activity_ids: dict[str
     return {"activity": activity, "activity_id": activity_ids[activity], **claim}
 
 
-def evaluate_cases(plan_match_path: Path, bindings_path: Path, output: Path) -> None:
+def evaluate_cases(match_path: Path, bindings_path: Path, output: Path) -> None:
     bindings = read_json(bindings_path)
     activity_ids = {item["activity"]: item["activity_id"] for item in bindings["bindings"]}
-    plan_match = read_json(plan_match_path)
-    if plan_match.get("state") != "CLOSED":
-        die("normal canonical cases require a closed plan match")
-    normal_base = closed_claim("PLAN", "MATCH_RESOURCE_ACTION_SET", "GOOO_INTENT_MATCHES_OPENTOFU_PLAN")
+    match = read_json(match_path)
+    if match.get("state") != "CLOSED":
+        die("normal canonical cases require a closed semantic oracle match")
+    normal_base = closed_claim("CONFORMANCE", "MATCH_SERVICE_CONTRACT_RELATIONS", "GOOO_SERVICE_CONTRACT_MATCHES_GENERATED_JSON_AND_OPENTOFU_VALIDATION")
     unknowns = [
-        ("unknown-stale-plan", unknown_claim("PLAN", "MATCH_CURRENT_PLAN_INPUT", "STALE_PLAN_INPUT_DIGEST", "DIRECT_MISSING", "REGENERATE_PLAN_FOR_CURRENT_ARTIFACT")),
-        ("unknown-inferred-engine", unknown_claim("ENGINE", "BIND_PLAN_ENGINE", "ENGINE_INFERRED_FROM_COMPATIBILITY_FIELD", "DIRECT_MISSING", "CAPTURE_EXPLICIT_OPENTOFU_RELEASE_RECEIPT")),
-        ("unknown-unsupported-show-json", unknown_claim("PLAN", "READ_PLAN_SHOW_JSON", "UNSUPPORTED_SHOW_JSON_FORMAT_MAJOR", "OBSERVATION_UNAVAILABLE", "PIN_SUPPORTED_SHOW_JSON_FORMAT")),
+        ("unknown-stale-generated-config", unknown_claim("CONFORMANCE", "MATCH_CURRENT_GENERATED_CONFIG", "STALE_GENERATED_CONFIG_DIGEST", "DIRECT_MISSING", "REGENERATE_MAIN_TF_JSON")),
+        ("unknown-unobserved-validate", unknown_claim("VALIDATION", "READ_VALIDATE_JSON", "OPENTOFU_VALIDATE_JSON_NOT_OBSERVED", "OBSERVATION_UNAVAILABLE", "CAPTURE_PINNED_VALIDATE_JSON", ["OPENTOFU_VALIDATE_JSON"])),
+        ("unknown-required-mapping", unknown_claim("CONFORMANCE", "MATCH_REQUIRED_OUTPUT_MAPPING", "REQUIRED_OUTPUT_MAPPING_NOT_OBSERVED", "DIRECT_MISSING", "CAPTURE_REQUIRED_OUTPUT_MAPPING", [])),
     ]
     refuted = [
-        ("refuted-ignored-drift", refuted_claim("PLAN", "REJECT_IGNORED_DRIFT", "PLAN_DRIFT_WAS_NOT_INCLUDED_IN_MATCH")),
-        ("refuted-resource-action", refuted_claim("PLAN", "MATCH_RESOURCE_ACTION_SET", "GOOO_INTENT_PLAN_RESOURCE_ACTION_CONTRADICTION")),
-        ("refuted-summary", refuted_claim("PLAN", "MATCH_CHANGE_SUMMARY", "GOOO_INTENT_PLAN_SUMMARY_CONTRADICTION")),
+        ("refuted-port-type", refuted_claim("CONFORMANCE", "MATCH_SERVICE_CONTRACT_RELATIONS", "SERVICE_PORT_TYPE_CONTRADICTION")),
+        ("refuted-required-output", refuted_claim("CONFORMANCE", "MATCH_REQUIRED_OUTPUT_MAPPING", "REQUIRED_OUTPUT_RELATION_CONTRADICTION")),
+        ("refuted-authority", refuted_claim("AUTHORITY", "REJECT_SIDE_EFFECT_OR_EXIT_CONTRADICTION", "READ_ONLY_PERMISSION_CONTRADICTION")),
     ]
     cases = []
-    for case_id in ("normal-exact-resource-action", "normal-explicit-engine", "normal-zero-drift"):
-        cases.append({"case_id": case_id, "class": "normal", "decision": "CLOSED", "claims": [attach_activity(normal_base, "MatchGoooIntentToOpenTofuPlan", activity_ids)], "resolution": "EXACT"})
+    for case_id in ("normal-service-port", "normal-required-outputs", "normal-providerless-validation"):
+        cases.append({"case_id": case_id, "class": "normal", "decision": "CLOSED", "claims": [attach_activity(normal_base, "MatchGoooIntentToIndependentOracle", activity_ids)], "resolution": "EXACT"})
     for case_id, claim in unknowns:
-        full = attach_activity(claim, "MatchGoooIntentToOpenTofuPlan", activity_ids)
-        if set(full) < UNKNOWN_FIELDS or not isinstance(full["blocked_by"], list):
+        full = attach_activity(claim, "PreserveUnknownCase", activity_ids)
+        if not UNKNOWN_FIELDS.issubset(full) or not isinstance(full["blocked_by"], list):
             die("unknown canonical case lost coordinates")
         cases.append({"case_id": case_id, "class": "unknown", "decision": "FAIL_CLOSED", "claims": [full], "resolution": "LOWER_RESOLUTION"})
     for case_id, claim in refuted:
-        full = attach_activity(claim, "MatchGoooIntentToOpenTofuPlan", activity_ids)
+        full = attach_activity(claim, "RefuteContradictionCase", activity_ids)
         cases.append({"case_id": case_id, "class": "refuted", "decision": "FAIL_CLOSED", "claims": [full], "precedence": "REFUTED_OVER_UNKNOWN", "resolution": "EXACT"})
     if sum(case["class"] == "normal" for case in cases) != 3 or sum(case["class"] == "unknown" for case in cases) != 3 or sum(case["class"] == "refuted" for case in cases) != 3:
         die("canonical case denominator is not 3/3/3")
     write_json(output, {
-        "schema": "gooo/opentofu-envelope/cases/v1",
+        "schema": "gooo/opentofu-envelope/cases/v2",
         "state": "CLOSED",
         "state_precedence": ["REFUTED", "UNKNOWN", "CLOSED"],
         "precedence_rule": "REFUTED > UNKNOWN > CLOSED",
@@ -494,16 +548,16 @@ def replay(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path,
         replay_dir = Path(directory)
         generate(source, graph, lock, spec, bindings, denominator, inventory_path, replay_dir)
         comparisons = []
-        for name in ("intent.tf.json", "dossier.md"):
+        for name in ("main.tf.json", "dossier.md"):
             first = publish_dir / name
             second = replay_dir / name
             equal = first.read_bytes() == second.read_bytes()
             comparisons.append({"file": name, "byte_equal": equal, "first_sha256": sha256_file(first), "second_sha256": sha256_file(second)})
-    write_json(output, {"schema": "gooo/opentofu-envelope/replay/v1", "state": "CLOSED" if all(item["byte_equal"] for item in comparisons) else "REFUTED", "comparison_count": len(comparisons), "comparisons": comparisons})
+    write_json(output, {"schema": "gooo/opentofu-envelope/replay/v2", "state": "CLOSED" if all(item["byte_equal"] for item in comparisons) else "REFUTED", "comparison_count": len(comparisons), "comparisons": comparisons})
 
 
-def producer(source: Path, graph: Path, artifact: str, evaluator: str) -> dict[str, str]:
-    return {"source": str(source), "ir": str(graph), "generated_artifact": artifact, "evaluator": evaluator}
+def producer(source: Path, graph: Path, artifact: str, observation: str, oracle: str, evaluator: str) -> dict[str, str]:
+    return {"source": str(source), "ir": str(graph), "generated_artifact": artifact, "opentofu_observation": observation, "independent_oracle": oracle, "evaluator": evaluator}
 
 
 def record(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path, bindings_path: Path, denominator_path: Path, inventory_path: Path, validation_path: Path, receipt_path: Path, match_path: Path, oracle_path: Path, cases_path: Path, replay_path: Path, measurements_path: Path, go_version_path: Path, output: Path) -> None:
@@ -513,15 +567,15 @@ def record(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path,
     activity_ids = {item["activity"]: item["activity_id"] for item in bindings["bindings"]}
     cell_ids = {cell["activity"]: cell["id"] for cell in denominator["cells"]}
     inventory_doc = read_json(inventory_path)
-    validation = read_json(validation_path)
+    validation_doc = read_json(validation_path)
     receipt = read_json(receipt_path)
     match = read_json(match_path)
-    oracle = load_oracle(oracle_path)
+    oracle = load_service_oracle(oracle_path)
     cases = read_json(cases_path)
     replay_doc = read_json(replay_path)
     measurements = read_json(measurements_path)
-    if receipt.get("state") != "CLOSED" or match.get("state") != "CLOSED" or validation.get("state") != "CLOSED" or replay_doc.get("state") != "CLOSED":
-        die("record requires closed validation, plan match, and replay")
+    if receipt.get("state") != "CLOSED" or match.get("state") != "CLOSED" or validation_doc.get("state") != "CLOSED" or replay_doc.get("state") != "CLOSED":
+        die("record requires closed validation, semantic match, receipt, and replay")
     if cases.get("case_count") != 9 or len(cases.get("cases", [])) != 9 or cases.get("state_precedence") != ["REFUTED", "UNKNOWN", "CLOSED"] or cases.get("precedence_rule") != "REFUTED > UNKNOWN > CLOSED":
         die("record requires exactly 9 canonical cases")
     if cases.get("outcome_counts") != {"CLOSED": 3, "UNKNOWN": 3, "REFUTED": 3}:
@@ -531,6 +585,8 @@ def record(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path,
             die("measurement enum value is invalid")
         for field in ("wall_ms", "count", "executed_test_count", "reused_test_evidence_count", "skipped_test_count", "not_observed_test_count", "peak_rss_kib"):
             integer(stage.get(field), field)
+        if stage["execution_state"] == "REUSED" and stage["count"] == 0:
+            die("reused phase must not be represented as a zero-count execution")
     by_stage = {stage["stage"]: stage for stage in measurements}
     for required in ("build", "test", "conformance"):
         if required not in by_stage:
@@ -544,95 +600,80 @@ def record(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path,
     reuse_key = {
         "source_digest": sha256_file(source),
         "toolchain_digest": sha256_value({"gooo_release": lock_doc["gooo"]["asset"]["sha256"], "opentofu_binary": lock_doc["opentofu"]["binary_sha256"]}),
-        "command_digest": sha256_value({"plan": lock_doc["opentofu"]["plan_command"], "show": lock_doc["opentofu"]["show_command"], "validate": lock_doc["opentofu"]["validate_command"]}),
+        "command_digest": sha256_value({"version": ["tofu", "version", "-json"], "validate": lock_doc["opentofu"]["validate_command"]}),
         "config_digest": sha256_file(lock),
         "dependency_digest": sha256_value({"json_spec": sha256_file(spec), "python": sys.version.split()[0]}),
-        "provider_lock_digest": sha256_value({"provider_lock": "ABSENT_FOR_BUILTIN_TERRAFORM_DATA"}),
+        "provider_lock_digest": sha256_value({"provider_lock": "ABSENT_FOR_PROVIDERLESS_CONFIG"}),
         "test_inventory_digest": sha256_file(cases_path),
-        "policy_digest": sha256_value({"profile": "READ_ONLY", "apply": 0, "test": 0, "cloud": 0, "network": 0, "source_write": 0}),
+        "policy_digest": sha256_value({"profile": "READ_ONLY", "apply": 0, "test": 0, "cloud": 0, "network": 0, "provider_install": 0, "source_write": 0}),
     }
     for key in REUSE_KEY_FIELDS:
         if not isinstance(reuse_key.get(key), str) or len(reuse_key[key]) != 64:
             die(f"reuse key field is missing: {key}")
 
-    def metric(name: str, value: int, unit: str, activity: str, artifact: str) -> dict[str, Any]:
+    def metric(name: str, value: int, unit: str, activity: str, artifact: str, observation: str = "validation.json") -> dict[str, Any]:
         integer(value, name)
-        return {"name": name, "value": value, "unit": unit, "activity": activity, "activity_id": activity_ids[activity], "cell_id": cell_ids[activity], "producer": producer(source, graph, artifact, "scripts/envelope.py:record")}
+        return {"name": name, "value": value, "unit": unit, "activity": activity, "activity_id": activity_ids[activity], "cell_id": cell_ids[activity], "producer": producer(source, graph, artifact, observation, "service-contract-oracle-v1.json", "scripts/envelope.py:record")}
 
     artifact_files = sorted(path.name for path in publish_dir.iterdir() if path.is_file())
+    if artifact_files != sorted(["contract-receipt.json", "dossier.md", "main.tf.json"]):
+        die("generated artifact set is not exactly main.tf.json, contract-receipt.json, dossier.md")
     artifact_bytes = sum((publish_dir / name).stat().st_size for name in artifact_files)
+    main_tf_bytes = (publish_dir / "main.tf.json").stat().st_size
     metrics = [
-        metric("user_path_steps", denominator["expected_user_path_steps"], "steps", "PreserveReadOnlyBoundary", "observation.json"),
-        metric("generated_file_count", len(artifact_files), "files", "GenerateHumanDossier", "observation.json"),
-        metric("executed_verification_stages", sum(stage["count"] for stage in measurements if stage["execution_state"] == "EXECUTED"), "stage-executions", "PreserveReadOnlyBoundary", "observation.json"),
-        metric("reused_verification_stages", sum(stage["count"] for stage in measurements if stage["execution_state"] == "REUSED"), "stage-reuses", "PreserveReadOnlyBoundary", "observation.json"),
-        metric("resource_action_count", match["resource_action_count"], "resource-actions", "MatchGoooIntentToOpenTofuPlan", "plan-match.json"),
+        metric("input_gooo_files", inventory_doc["gooo_physical_files"], "files", "DeclareGoooInfrastructureIntent", "main.gooo", "bindings.json"),
+        metric("input_gooo_lines", inventory_doc["gooo_physical_lines"], "lines", "DeclareGoooInfrastructureIntent", "main.gooo", "bindings.json"),
+        metric("generated_tf_json_files", 1, "files", "GenerateOpenTofuCompatibleArtifact", "main.tf.json"),
+        metric("generated_tf_json_bytes", main_tf_bytes, "bytes", "GenerateOpenTofuCompatibleArtifact", "main.tf.json"),
+        metric("semantic_relations", match["semantic_relation_count"], "relations", "BindGoooIntentToOpenTofu", "bindings.json"),
+        metric("opentofu_commands_attempted", receipt["validation_attempted"], "commands", "GenerateOpenTofuValidationReceipt", "contract-receipt.json"),
+        metric("opentofu_commands_executed", receipt["validation_executed"], "commands", "GenerateOpenTofuValidationReceipt", "contract-receipt.json"),
+        metric("opentofu_exit_code", receipt["validation_exit_code"], "exit-code", "GenerateOpenTofuValidationReceipt", "contract-receipt.json"),
+        metric("validation_error_count", receipt["diagnostics"]["error_count"], "diagnostics", "GenerateOpenTofuValidationReceipt", "contract-receipt.json"),
+        metric("validation_warning_count", receipt["diagnostics"]["warning_count"], "diagnostics", "GenerateOpenTofuValidationReceipt", "contract-receipt.json"),
         metric("build_wall_ms", by_stage["build"]["wall_ms"], "ms", "GenerateOpenTofuCompatibleArtifact", "observation.json"),
         metric("test_wall_ms", by_stage["test"]["wall_ms"], "ms", "PreserveReadOnlyBoundary", "observation.json"),
-        metric("conformance_wall_ms", by_stage["conformance"]["wall_ms"], "ms", "MatchGoooIntentToOpenTofuPlan", "observation.json"),
+        metric("conformance_wall_ms", by_stage["conformance"]["wall_ms"], "ms", "MatchGoooIntentToIndependentOracle", "observation.json"),
         metric("peak_rss_kib", max(stage["peak_rss_kib"] for stage in measurements), "KiB", "PreserveReadOnlyBoundary", "observation.json"),
-        metric("executed_test_count", by_stage["test"]["executed_test_count"], "tests", "PreserveReadOnlyBoundary", "observation.json"),
-        metric("reused_test_evidence_count", by_stage["test"]["reused_test_evidence_count"], "tests", "VerifyDeterministicReplay", "observation.json"),
-        metric("skipped_test_count", by_stage["test"]["skipped_test_count"], "tests", "PreserveReadOnlyBoundary", "observation.json"),
-        metric("not_observed_test_count", by_stage["test"]["not_observed_test_count"], "tests", "PreserveReadOnlyBoundary", "observation.json"),
-        metric("artifact_files", len(artifact_files), "files", "GenerateOpenTofuCompatibleArtifact", "observation.json"),
-        metric("artifact_bytes", artifact_bytes, "bytes", "GenerateOpenTofuCompatibleArtifact", "observation.json"),
+        metric("tests_total", 9, "tests", "PreserveReadOnlyBoundary", "cases.json", "cases.json"),
+        metric("tests_executed", by_stage["test"]["executed_test_count"], "tests", "PreserveReadOnlyBoundary", "cases.json", "cases.json"),
+        metric("tests_reused", by_stage["test"]["reused_test_evidence_count"], "tests", "VerifyDeterministicReplay", "replay.json", "cases.json"),
+        metric("tests_skipped", by_stage["test"]["skipped_test_count"], "tests", "PreserveReadOnlyBoundary", "cases.json", "cases.json"),
+        metric("tests_not_observed", by_stage["test"]["not_observed_test_count"], "tests", "PreserveReadOnlyBoundary", "cases.json", "cases.json"),
+        metric("replay_comparisons", replay_doc["comparison_count"], "comparisons", "VerifyDeterministicReplay", "replay.json", "cases.json"),
+        metric("replay_mismatches", sum(not item["byte_equal"] for item in replay_doc["comparisons"]), "mismatches", "VerifyDeterministicReplay", "replay.json", "cases.json"),
+        metric("artifact_files", len(artifact_files), "files", "VerifyGeneratedOutputs", "observation.json"),
         metric("repository_writes", lock_doc["authority"]["repository_writes"], "writes", "PreserveReadOnlyBoundary", "observation.json"),
-        metric("descendant_directories", inventory_doc["descendant_directory_count"], "directories", "PreserveReadOnlyBoundary", "dossier.md"),
-        metric("regular_files_excluding_root_readme", inventory_doc["regular_file_count"], "files", "VerifyGeneratedOutputs", "dossier.md"),
-        metric("repository_physical_lines", inventory_doc["physical_line_count"], "lines", "VerifyGeneratedOutputs", "dossier.md"),
-        metric("go_physical_files", inventory_doc["go_physical_files"], "files", "GenerateOpenTofuCompatibleArtifact", "dossier.md"),
-        metric("go_physical_lines", inventory_doc["go_physical_lines"], "lines", "GenerateOpenTofuCompatibleArtifact", "dossier.md"),
-        metric("gooo_physical_files", inventory_doc["gooo_physical_files"], "files", "DeclareGoooInfrastructureIntent", "main.gooo"),
-        metric("gooo_physical_lines", inventory_doc["gooo_physical_lines"], "lines", "DeclareGoooInfrastructureIntent", "main.gooo"),
+        metric("infrastructure_mutations", 0, "mutations", "PreserveReadOnlyBoundary", "observation.json"),
+        metric("network_provider_install_attempts", 0, "attempts", "PreserveReadOnlyBoundary", "observation.json"),
     ]
-    improvement_claim = unknown_claim(
-        "IMPROVEMENT",
-        "COMPARE_EXACT_BEFORE_AFTER",
-        "EXACT_BEFORE_AFTER_PAIR_MISSING",
-        "DIRECT_MISSING",
-        "CAPTURE_EXACT_BEFORE_AFTER_PAIR",
-        ["BEFORE_EXACT_OBSERVATION", "AFTER_EXACT_OBSERVATION"],
-    )
+    improvement_claim = unknown_claim("IMPROVEMENT", "COMPARE_EXACT_BEFORE_AFTER", "EXACT_BEFORE_AFTER_PAIR_MISSING", "DIRECT_MISSING", "CAPTURE_EXACT_BEFORE_AFTER_PAIR", ["BEFORE_EXACT_OBSERVATION", "AFTER_EXACT_OBSERVATION"])
     primary = []
     for cell in denominator["cells"]:
-        primary.append({"metric_id": f"cell-metric-{cell['ordinal']:02d}", "cell_id": cell["id"], "activity": cell["activity"], "activity_id": activity_ids[cell["activity"]], "value": "CLOSED", "unit": "cell-state", "producer": producer(source, graph, "observation.json", "scripts/envelope.py:record")})
+        primary.append({"metric_id": f"cell-metric-{cell['ordinal']:02d}", "cell_id": cell["id"], "activity": cell["activity"], "activity_id": activity_ids[cell["activity"]], "value": "CLOSED", "unit": "cell-state", "producer": producer(source, graph, "main.tf.json", "validation.json", "service-contract-oracle-v1.json", "scripts/envelope.py:record")})
     output_doc = {
-        "schema": "gooo/opentofu-envelope/observation/v1",
+        "schema": "gooo/opentofu-envelope/observation/v2",
         "state": "CLOSED",
         "state_precedence": ["REFUTED", "UNKNOWN", "CLOSED"],
         "precedence_rule": "REFUTED > UNKNOWN > CLOSED",
         "subject": {"source_sha256": sha256_file(source), "graph_sha256": sha256_file(graph), "release_lock_sha256": sha256_file(lock)},
         "toolchain": {"go_requirement": "1.27.x", "go_version_evidence": go_version},
-        "user_path": {
-            "step_count": denominator["expected_user_path_steps"],
-            "activities": [
-                "DeclareGoooInfrastructureIntent",
-                "BindGoooIntentToOpenTofu",
-                "GenerateOpenTofuCompatibleArtifact",
-                "VerifyGeneratedOutputs",
-                "MatchGoooIntentToOpenTofuPlan",
-            ],
-        },
+        "user_path": {"step_count": denominator["expected_user_path_steps"], "activities": ["DeclareGoooInfrastructureIntent", "BindGoooIntentToOpenTofu", "GenerateOpenTofuCompatibleArtifact", "VerifyGeneratedOutputs", "MatchGoooIntentToIndependentOracle"]},
         "generated_outputs": {"file_count": len(artifact_files), "files": artifact_files, "bytes": artifact_bytes, "digests": {name: sha256_file(publish_dir / name) for name in artifact_files}},
         "metrics": metrics,
         "primary_metrics": primary,
         "verification_stages": measurements,
-        "improvement": {
-            "state": "UNKNOWN",
-            "claim": improvement_claim,
-            "before": None,
-            "after": None,
-            "cache_hit_is_not_reuse": True,
-        },
+        "phase_contract": {"execution_state_values": sorted(EXECUTION_VALUES), "cache_state_values": sorted(CACHE_VALUES), "runner_persistence_values": sorted(PERSISTENCE_VALUES), "reuse_never_zero_ms_execution": True, "cache_hit_is_not_test_reuse": True, "prior_evidence_requires_all_reuse_key_fields": REUSE_KEY_FIELDS},
+        "improvement": {"state": "UNKNOWN", "claim": improvement_claim, "before": None, "after": None, "cache_hit_is_not_reuse": True},
         "cases": cases,
-        "validation": validation,
-        "plan_receipt": receipt,
-        "plan_match": match,
-        "plan_oracle": {"sha256": sha256_file(oracle_path), "resource_actions": oracle["resource_actions"], "side_effects": oracle["side_effects"]},
-        "identity": {"source_sha256": sha256_file(source), "graph_sha256": sha256_file(graph), "artifact_sha256": sha256_file(publish_dir / "intent.tf.json"), "dossier_sha256": sha256_file(publish_dir / "dossier.md"), "plan_receipt_sha256": sha256_file(receipt_path), "plan_match_sha256": sha256_file(match_path), "oracle_sha256": sha256_file(oracle_path), "binary_sha256": receipt["binary_sha256"], "version_json_sha256": receipt["version_json_sha256"], "show_json_sha256": receipt["show_json_sha256"]},
+        "validation": validation_doc,
+        "contract_receipt": receipt,
+        "semantic_oracle_match": match,
+        "independent_oracle": {"sha256": sha256_file(oracle_path), "service": oracle["service"], "required_outputs": oracle["required_outputs"], "side_effects": oracle["side_effects"]},
+        "identity": {"source_sha256": sha256_file(source), "graph_sha256": sha256_file(graph), "main_tf_json_sha256": sha256_file(publish_dir / "main.tf.json"), "contract_receipt_sha256": sha256_file(publish_dir / "contract-receipt.json"), "dossier_sha256": sha256_file(publish_dir / "dossier.md"), "validation_json_sha256": sha256_file(validation_path), "binary_sha256": receipt["binary_sha256"], "version_json_sha256": receipt["version_json_sha256"]},
         "reuse_contract": {"installation_binary_cache_state": lock_doc["cache_contract"]["installation_binary_cache_state"], "go_build_cache_state": lock_doc["cache_contract"]["go_build_cache_state"], "prior_test_evidence_reuse_state": lock_doc["cache_contract"]["prior_test_evidence_reuse_state"], "runner_persistence": lock_doc["cache_contract"]["runner_persistence"], "reuse_key": reuse_key},
         "authority": lock_doc["authority"],
+        "policy": lock_doc["policy"],
         "official_inputs": {"gooo_release": lock_doc["gooo"], "opentofu_release": lock_doc["opentofu"], "json_spec_sha256": sha256_file(spec), "go_version_evidence": go_version},
         "replay": replay_doc,
     }
@@ -642,41 +683,32 @@ def record(publish_dir: Path, source: Path, graph: Path, lock: Path, spec: Path,
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser()
     sub = root.add_subparsers(dest="command", required=True)
-
     command = sub.add_parser("inventory")
     command.add_argument("--root", type=Path, required=True)
     command.add_argument("--output", type=Path, required=True)
-
     command = sub.add_parser("bind")
     for name in ("source", "graph", "denominator", "output"):
         command.add_argument(f"--{name}", type=Path, required=True)
-
     command = sub.add_parser("generate")
     for name in ("source", "graph", "lock", "spec", "bindings", "denominator", "inventory", "output-dir"):
         command.add_argument(f"--{name}", type=Path, required=True)
-
-    command = sub.add_parser("plan-receipt")
-    for name in ("plan-show", "version-json", "binary", "artifact", "oracle", "lock", "output"):
-        command.add_argument(f"--{name}", type=Path, required=True)
-    command.add_argument("--exit-code", type=int, required=True)
-
-    command = sub.add_parser("match-plan")
-    for name in ("artifact", "receipt", "oracle", "output"):
-        command.add_argument(f"--{name}", type=Path, required=True)
-
-    command = sub.add_parser("cases")
-    for name in ("plan-match", "bindings", "output"):
-        command.add_argument(f"--{name}", type=Path, required=True)
-
-    command = sub.add_parser("replay")
-    for name in ("publish-dir", "source", "graph", "lock", "spec", "bindings", "denominator", "inventory", "output"):
-        command.add_argument(f"--{name}", type=Path, required=True)
-
     command = sub.add_parser("validate")
     command.add_argument("--tofu-json", type=Path, required=True)
     command.add_argument("--artifact", type=Path, required=True)
     command.add_argument("--output", type=Path, required=True)
-
+    command = sub.add_parser("contract-receipt")
+    for name in ("source", "graph", "artifact", "validation", "tofu-json", "version-json", "binary", "oracle", "lock", "output"):
+        command.add_argument(f"--{name}", type=Path, required=True)
+    command.add_argument("--exit-code", type=int, required=True)
+    command = sub.add_parser("match-contract")
+    for name in ("source", "graph", "artifact", "validation", "tofu-json", "receipt", "oracle", "output"):
+        command.add_argument(f"--{name}", type=Path, required=True)
+    command = sub.add_parser("cases")
+    for name in ("match", "bindings", "output"):
+        command.add_argument(f"--{name}", type=Path, required=True)
+    command = sub.add_parser("replay")
+    for name in ("publish-dir", "source", "graph", "lock", "spec", "bindings", "denominator", "inventory", "output"):
+        command.add_argument(f"--{name}", type=Path, required=True)
     command = sub.add_parser("record")
     for name in ("publish-dir", "source", "graph", "lock", "spec", "bindings", "denominator", "inventory", "validation", "receipt", "match", "oracle", "cases", "replay", "measurements", "go-version", "output"):
         command.add_argument(f"--{name}", type=Path, required=True)
@@ -691,18 +723,18 @@ def main() -> None:
         bind(args.source, args.graph, args.denominator, args.output)
     elif args.command == "generate":
         generate(args.source, args.graph, args.lock, args.spec, args.bindings, args.denominator, args.inventory, args.output_dir)
-    elif args.command == "plan-receipt":
-        plan_receipt(args.plan_show, args.version_json, args.binary, args.artifact, args.oracle, args.lock, args.exit_code, args.output)
-    elif args.command == "match-plan":
-        match_plan(args.artifact, args.receipt, args.oracle, args.output)
+    elif args.command == "validate":
+        validate(args.tofu_json, args.artifact, args.output)
+    elif args.command == "contract-receipt":
+        contract_receipt(args.source, args.graph, args.artifact, args.validation, args.tofu_json, args.version_json, args.binary, args.oracle, args.lock, args.exit_code, args.output)
+        if read_json(args.output).get("state") != "CLOSED":
+            die("contract receipt did not close")
+    elif args.command == "match-contract":
+        match_contract(args.source, args.graph, args.artifact, args.validation, args.tofu_json, args.receipt, args.oracle, args.output)
     elif args.command == "cases":
-        evaluate_cases(args.plan_match, args.bindings, args.output)
+        evaluate_cases(args.match, args.bindings, args.output)
     elif args.command == "replay":
         replay(args.publish_dir, args.source, args.graph, args.lock, args.spec, args.bindings, args.denominator, args.inventory, args.output)
-    elif args.command == "validate":
-        tofu = read_json(args.tofu_json)
-        valid = tofu.get("valid") is True and (tofu.get("error_count") in (None, 0))
-        write_json(args.output, {"schema": "gooo/opentofu-envelope/validation/v1", "state": "CLOSED" if valid else "REFUTED", "artifact_sha256": sha256_file(args.artifact), "official_opentofu": tofu, "structural_checks": {"output_file_count": 2}})
     elif args.command == "record":
         record(args.publish_dir, args.source, args.graph, args.lock, args.spec, args.bindings, args.denominator, args.inventory, args.validation, args.receipt, args.match, args.oracle, args.cases, args.replay, args.measurements, args.go_version, args.output)
 

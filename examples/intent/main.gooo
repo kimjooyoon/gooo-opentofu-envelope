@@ -1,29 +1,39 @@
 package opentofuenvelope
 namespace opentofuenvelope
 
-entity InfrastructureIntent id "envelope://opentofu/intent/hello"
-entity TerraformDataIntent id "envelope://opentofu/intent/hello/terraform-data"
-entity OpenTofuSpecBinding id "envelope://opentofu/intent/hello/spec-binding"
-entity OpenTofuJSONSpecReceipt id "envelope://opentofu/intent/hello/spec-receipt"
-entity OpenTofuArtifact id "envelope://opentofu/intent/hello/artifact"
-entity HumanDossier id "envelope://opentofu/intent/hello/dossier"
-entity NormalVerification id "envelope://opentofu/intent/hello/normal-verification"
-entity OpenTofuPlanReceipt id "envelope://opentofu/intent/hello/plan-receipt"
-entity PlanIntentMatch id "envelope://opentofu/intent/hello/plan-intent-match"
-entity UnknownCase id "envelope://opentofu/intent/hello/unknown"
-entity RefutedCase id "envelope://opentofu/intent/hello/refuted"
-entity ReplayVerification id "envelope://opentofu/intent/hello/replay"
-entity ReadOnlyObservation id "envelope://opentofu/intent/hello/read-only"
+entity ServiceInfrastructureContract id "envelope://opentofu/service/web/contract"
+entity ServicePortContract id "envelope://opentofu/service/web/port"
+entity OpenTofuSpecBinding id "envelope://opentofu/service/web/spec-binding"
+entity OpenTofuJSONSpecReceipt id "envelope://opentofu/service/web/spec-receipt"
+entity OpenTofuArtifact id "envelope://opentofu/service/web/main-tf-json"
+entity HumanDossier id "envelope://opentofu/service/web/dossier"
+entity NormalVerification id "envelope://opentofu/service/web/normal-verification"
+entity OpenTofuValidationReceipt id "envelope://opentofu/service/web/validate-receipt"
+entity SemanticOracleMatch id "envelope://opentofu/service/web/oracle-match"
+entity UnknownCase id "envelope://opentofu/service/web/unknown"
+entity RefutedCase id "envelope://opentofu/service/web/refuted"
+entity ReplayVerification id "envelope://opentofu/service/web/replay"
+entity ReadOnlyObservation id "envelope://opentofu/service/web/read-only"
 
-activity DeclareGoooInfrastructureIntent(InfrastructureIntent) -> TerraformDataIntent
-activity BindGoooIntentToOpenTofu(TerraformDataIntent) -> OpenTofuSpecBinding
+// @service name=web type=http port=8080
+// @environment name=APP_ENV type=string value=production
+// @required_output name=service_url type=string
+// @required_output name=service_port type=number
+// @required_output name=service_type type=string
+// @relation subject=service predicate=declares object=service_port
+// @relation subject=service predicate=declares object=service_type
+// @relation subject=service predicate=requires object=service_url
+// @relation subject=environment predicate=configures object=service
+
+activity DeclareGoooInfrastructureIntent(ServiceInfrastructureContract) -> ServicePortContract
+activity BindGoooIntentToOpenTofu(ServicePortContract) -> OpenTofuSpecBinding
 activity ConsumePinnedOpenTofuJSONSpec(OpenTofuSpecBinding) -> OpenTofuJSONSpecReceipt
 activity GenerateOpenTofuCompatibleArtifact(OpenTofuJSONSpecReceipt) -> OpenTofuArtifact
 activity GenerateHumanDossier(OpenTofuArtifact) -> HumanDossier
 activity VerifyGeneratedOutputs(HumanDossier) -> NormalVerification
-activity GenerateOpenTofuPlanReceipt(NormalVerification) -> OpenTofuPlanReceipt
-activity MatchGoooIntentToOpenTofuPlan(OpenTofuPlanReceipt) -> PlanIntentMatch
-activity PreserveUnknownCase(PlanIntentMatch) -> UnknownCase
-activity RefuteContradictionCase(PlanIntentMatch) -> RefutedCase
+activity GenerateOpenTofuValidationReceipt(NormalVerification) -> OpenTofuValidationReceipt
+activity MatchGoooIntentToIndependentOracle(OpenTofuValidationReceipt) -> SemanticOracleMatch
+activity PreserveUnknownCase(SemanticOracleMatch) -> UnknownCase
+activity RefuteContradictionCase(SemanticOracleMatch) -> RefutedCase
 activity VerifyDeterministicReplay(NormalVerification) -> ReplayVerification
-activity PreserveReadOnlyBoundary(UnknownCase, RefutedCase, ReplayVerification, PlanIntentMatch) -> ReadOnlyObservation
+activity PreserveReadOnlyBoundary(UnknownCase, RefutedCase, ReplayVerification, SemanticOracleMatch) -> ReadOnlyObservation

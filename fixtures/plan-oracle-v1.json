@@ -1,0 +1,7 @@
+{
+  "schema": "gooo/opentofu-envelope/plan-oracle/v1",
+  "subject": "envelope://opentofu/intent/hello",
+  "resource_actions": [{"address": "terraform_data.hello", "action": "create"}],
+  "change_summary": {"add": 1, "change": 0, "forget": 0, "import": 0, "operation": "plan", "remove": 0},
+  "side_effects": {"apply": 0, "cloud": 0, "network": 0, "provider": 0, "source_write": 0, "state_mutation": 0}
+}

@@ -7,8 +7,10 @@ This repository closes one deliberately small path:
 The `.gooo` input declares a `web` service with type `http`, port `8080`, the
 `APP_ENV=production` environment, three required outputs, and four semantic
 relations. The workflow obtains checksum-locked releases, dumps the released
-Gooo graph, generates providerless OpenTofu JSON, and runs the pinned OpenTofu
-CLI at the machine-readable `version -json` and `validate -json` boundary.
+Gooo graph, verifies its authoritative `.gooo`/IR boundary and every
+`used`/`wasGeneratedBy` activity port, generates providerless OpenTofu JSON,
+and runs the pinned OpenTofu CLI at the machine-readable `version -json` and
+`validate -json` boundary.
 
 The generated artifact is exactly `main.tf.json`, `contract-receipt.json`, and
 `dossier.md`. The receipt carries checksum verification, binary digest, version
@@ -43,7 +45,12 @@ test-inventory, and policy digests. Reuse is never reported as a zero-millisecon
 current-run execution.
 
 No exact before/after pair exists in this use case, so performance improvement
-remains `UNKNOWN`. The workflow records exact integer wall milliseconds, peak
-RSS KiB, test counts, replay comparisons, artifact files/bytes, repository
-writes, infrastructure mutations, and provider-install/network attempts. The
-root README is excluded from repository inventory.
+and user utility remain `UNKNOWN`. The workflow records exact integer wall
+milliseconds, peak RSS KiB, test counts, replay comparisons, artifact
+files/bytes, Go/Gooo file and physical-line counts, repository subfolders,
+repository writes, and external mutation counts. The root README is excluded
+from repository inventory; non-empty repository status is a read-only boundary
+failure rather than silently reported as zero writes. Core semantic authority
+is `CLOSED` only when the released Gooo IR, pinned OpenTofu JSON validation, and
+independent service oracle all provide evidence; utility remains explicitly
+unclosed until a before/after user observation exists.

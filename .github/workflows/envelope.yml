@@ -121,6 +121,7 @@ jobs:
           curl --fail --location --silent --show-error "$spec_url" -o "$WORK_DIR/opentofu-json-spec.mdx"
           test "$(sha256sum "$WORK_DIR/opentofu-json-spec.mdx" | awk '{print $1}')" = "$(jq -r '.opentofu.json_spec.sha256' "$lock")"
           go version > "$WORK_DIR/go-version.txt"
+          grep -Eq '^go version go1\.27([.]| )' "$WORK_DIR/go-version.txt"
 
       - name: Bind the released Gooo semantic graph
         shell: bash
@@ -176,7 +177,7 @@ jobs:
           "$tofu" version -json > "$WORK_DIR/tofu-version.json"
           start_ns=$(date +%s%N)
           set +e
-          (cd "$WORK_DIR/module" && /usr/bin/time -f '%M' -o "$WORK_DIR/plan-rss-kib" "$tofu" plan -refresh=false -input=false -json -detailed-exitcode > "$WORK_DIR/tofu-plan.jsonl")
+          (cd "$WORK_DIR/module" && /usr/bin/time -f '%M' -o "$WORK_DIR/plan-rss-kib" "$tofu" plan -refresh=false -input=false -out="$WORK_DIR/plan.bin" -detailed-exitcode > "$WORK_DIR/tofu-plan.stdout")
           plan_status=$?
           set -e
           end_ns=$(date +%s%N)
@@ -185,7 +186,14 @@ jobs:
           plan_rss_kib=$(tail -n 1 "$WORK_DIR/plan-rss-kib")
           printf '%s\n' "$plan_rss_kib" > "$WORK_DIR/plan-rss-kib"
           test "$plan_rss_kib" -ge 0
-          python3 scripts/envelope.py plan-receipt --plan-ui "$WORK_DIR/tofu-plan.jsonl" --version-json "$WORK_DIR/tofu-version.json" \
+          show_start_ns=$(date +%s%N)
+          /usr/bin/time -f '%M' -o "$WORK_DIR/show-rss-kib" "$tofu" show -json "$WORK_DIR/plan.bin" > "$WORK_DIR/tofu-show.json"
+          show_end_ns=$(date +%s%N)
+          echo $(( (show_end_ns-show_start_ns+999999)/1000000 )) > "$WORK_DIR/show-wall-ms"
+          show_rss_kib=$(tail -n 1 "$WORK_DIR/show-rss-kib")
+          printf '%s\n' "$show_rss_kib" > "$WORK_DIR/show-rss-kib"
+          test "$show_rss_kib" -ge 0
+          python3 scripts/envelope.py plan-receipt --plan-show "$WORK_DIR/tofu-show.json" --version-json "$WORK_DIR/tofu-version.json" \
             --binary "$tofu" --artifact "$PUBLISH_DIR/intent.tf.json" --oracle fixtures/plan-oracle-v1.json \
             --lock contracts/release-lock-v1.json --exit-code "$plan_status" --output "$WORK_DIR/plan-receipt.json"
           match_start_ns=$(date +%s%N)
@@ -194,7 +202,7 @@ jobs:
           match_end_ns=$(date +%s%N)
           echo $(( (match_end_ns-match_start_ns+999999)/1000000 )) > "$WORK_DIR/plan-match-wall-ms"
           printf '%s\n' "$(cat "$WORK_DIR/plan-rss-kib")" > "$WORK_DIR/match-rss-kib"
-          jq -e '.state=="CLOSED" and .iac_engine=="OPENTOFU" and .engine_identity_source=="PINNED_RELEASE_LOCK" and .exit_code==2 and .drift_count==0 and .resource_actions==[{"address":"terraform_data.hello","action":"create"}]' "$WORK_DIR/plan-receipt.json" >/dev/null
+          jq -e '.state=="CLOSED" and .iac_engine=="OPENTOFU" and .engine_identity_source=="PINNED_RELEASE_LOCK" and (.show_format_version|startswith("1.")) and .exit_code==2 and .drift_count==0 and .resource_actions==[{"address":"terraform_data.hello","action":"create"}]' "$WORK_DIR/plan-receipt.json" >/dev/null
           jq -e '.state=="CLOSED" and .claim.state=="CLOSED" and .resource_action_count==1 and .expected_resource_actions==.observed_resource_actions' "$WORK_DIR/plan-match.json" >/dev/null
 
       - name: Evaluate three canonical cases in each outcome class
@@ -229,20 +237,21 @@ jobs:
             --argjson generate_wall "$(cat "$WORK_DIR/generate-wall-ms")" --argjson generate_rss "$(cat "$WORK_DIR/generate-rss-kib")" \
             --argjson validate_wall "$(cat "$WORK_DIR/validate-wall-ms")" --argjson validate_rss "$(cat "$WORK_DIR/validate-rss-kib")" \
             --argjson plan_wall "$(cat "$WORK_DIR/plan-wall-ms")" --argjson plan_rss "$(cat "$WORK_DIR/plan-rss-kib")" \
+            --argjson show_wall "$(cat "$WORK_DIR/show-wall-ms")" --argjson show_rss "$(cat "$WORK_DIR/show-rss-kib")" \
             --argjson match_wall "$(cat "$WORK_DIR/plan-match-wall-ms")" --argjson match_rss "$(cat "$WORK_DIR/match-rss-kib")" \
             --argjson cases_wall "$(cat "$WORK_DIR/cases-wall-ms")" --argjson cases_rss "$(cat "$WORK_DIR/cases-rss-kib")" \
             --argjson replay_wall "$(cat "$WORK_DIR/replay-wall-ms")" --argjson replay_rss "$(cat "$WORK_DIR/replay-rss-kib")" \
             '[
               {stage:"build",wall_ms:($bind_wall+$generate_wall),peak_rss_kib:([$bind_rss,$generate_rss]|max),count:2,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:0,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0},
               {stage:"test",wall_ms:$cases_wall,peak_rss_kib:$cases_rss,count:9,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:9,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0},
-              {stage:"conformance",wall_ms:($validate_wall+$plan_wall+$match_wall+$replay_wall),peak_rss_kib:([$validate_rss,$plan_rss,$match_rss,$replay_rss]|max),count:4,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:0,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0}
+              {stage:"conformance",wall_ms:($validate_wall+$plan_wall+$show_wall+$match_wall+$replay_wall),peak_rss_kib:([$validate_rss,$plan_rss,$show_rss,$match_rss,$replay_rss]|max),count:5,execution_state:"EXECUTED",cache_state:"DISABLED",runner_persistence:"EPHEMERAL",prior_test_evidence_reuse_state:"NOT_REUSED",executed_test_count:0,reused_test_evidence_count:0,skipped_test_count:0,not_observed_test_count:0}
             ]' > "$WORK_DIR/measurements.json"
           python3 scripts/envelope.py record \
             --publish-dir "$PUBLISH_DIR" --source examples/intent/main.gooo --graph "$WORK_DIR/graph.json" --lock contracts/release-lock-v1.json \
             --spec "$WORK_DIR/opentofu-json-spec.mdx" --bindings "$WORK_DIR/bindings.json" --denominator contracts/envelope-v1.json \
             --inventory "$WORK_DIR/inventory.json" --validation "$WORK_DIR/validation.json" --receipt "$WORK_DIR/plan-receipt.json" \
             --match "$WORK_DIR/plan-match.json" --oracle fixtures/plan-oracle-v1.json --cases "$WORK_DIR/cases.json" --replay "$WORK_DIR/replay.json" \
-            --measurements "$WORK_DIR/measurements.json" --output "$EVIDENCE_DIR/observation.json"
+            --measurements "$WORK_DIR/measurements.json" --go-version "$WORK_DIR/go-version.txt" --output "$EVIDENCE_DIR/observation.json"
           cp "$PUBLISH_DIR/intent.tf.json" "$EVIDENCE_DIR/intent.tf.json"
           cp "$PUBLISH_DIR/dossier.md" "$EVIDENCE_DIR/dossier.md"
           cp "$WORK_DIR/graph.json" "$EVIDENCE_DIR/released-semantic-graph.json"
@@ -251,7 +260,9 @@ jobs:
           cp "$WORK_DIR/validation.json" "$EVIDENCE_DIR/validation.json"
           cp "$WORK_DIR/tofu-validate.json" "$EVIDENCE_DIR/tofu-validate.json"
           cp "$WORK_DIR/tofu-version.json" "$EVIDENCE_DIR/tofu-version.json"
-          cp "$WORK_DIR/tofu-plan.jsonl" "$EVIDENCE_DIR/tofu-plan.jsonl"
+          cp "$WORK_DIR/tofu-plan.stdout" "$EVIDENCE_DIR/tofu-plan.stdout"
+          cp "$WORK_DIR/tofu-show.json" "$EVIDENCE_DIR/tofu-show.json"
+          cp "$WORK_DIR/go-version.txt" "$EVIDENCE_DIR/go-version.txt"
           cp "$WORK_DIR/plan-receipt.json" "$EVIDENCE_DIR/plan-receipt.json"
           cp "$WORK_DIR/plan-match.json" "$EVIDENCE_DIR/plan-match.json"
           cp fixtures/plan-oracle-v1.json "$EVIDENCE_DIR/plan-oracle-v1.json"
@@ -265,6 +276,9 @@ jobs:
             (.metrics|all(.[]; (.activity_id|type)=="string" and (.producer|keys|length)==4)) and
             .generated_outputs.file_count==2 and
             .cases.case_count==9 and
+            .cases.state_precedence==["REFUTED","UNKNOWN","CLOSED"] and
+            .improvement.state=="UNKNOWN" and
+            .improvement.cache_hit_is_not_reuse==true and
             .plan_match.state=="CLOSED" and
             .authority.repository_writes==0 and
             .authority.opentofu_apply_executions==0 and
@@ -298,7 +312,9 @@ jobs:
             echo "- build: $build"
             echo "- test: $test_stage"
             echo "- conformance: $conformance"
+            echo "- Go toolchain: $(jq -r '.toolchain.go_version_evidence' "$observation")"
             echo "- artifact files / bytes: $(jq -r '.generated_outputs.file_count' "$observation") / $(jq -r '.generated_outputs.bytes' "$observation")"
+            echo "- improvement: $(jq -r '.improvement.state + " (" + .improvement.claim.reason + ")"' "$observation")"
             echo "- repository_writes: $(jq -r '.authority.repository_writes' "$observation")"
             echo "- OpenTofu: $(jq -r '.plan_receipt.iac_engine + " " + .plan_receipt.engine_version + ", exit_code=" + (.plan_receipt.exit_code|tostring) + ", resource_actions=" + (.plan_match.resource_action_count|tostring)' "$observation")"
             echo "- artifact digest: ${{ steps.evidence.outputs.artifact-digest }}"

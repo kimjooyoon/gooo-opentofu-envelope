@@ -177,7 +177,7 @@ jobs:
           end_ns=$(date +%s%N)
           echo $(( (end_ns-start_ns+999999)/1000000 )) > "$WORK_DIR/test-wall-ms"
           jq -e '.state=="CLOSED" and .case_count==6 and .outcome_counts=={"BOUND":2,"UNBOUND_UNKNOWN":2,"REFUTED":2}' "$WORK_DIR/cases.json" >/dev/null
-          jq -e '[.cases[]|select(.status=="UNBOUND_UNKNOWN")|.claim|keys|sort] | all(.==["blocked_by","next_operation","reason","stage","step","unknown_class"])' "$WORK_DIR/cases.json" >/dev/null
+          jq -e '[.cases[]|select(.status=="UNBOUND_UNKNOWN")|.claim|keys|sort] | all(.==["blocked_by","next_operation","reason","stage","state","step","unknown_class"])' "$WORK_DIR/cases.json" >/dev/null
           jq -e '.state=="CLOSED"' "$PUBLISH_DIR/contract-receipt.json" >/dev/null
 
       - name: Verify byte-identical deterministic replay

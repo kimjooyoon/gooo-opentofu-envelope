@@ -68,11 +68,14 @@ jobs:
           ' "$lock" >/dev/null
 
           verify_release() {
-            local repository=$1 tag=$2 release_id=$3 target=$4 prerelease=$5 output=$6
+            local repository=$1 tag=$2 release_id=$3 target=$4 prerelease=$5 output=$6 resolved
             gh api "repos/$repository/releases/tags/$tag" > "$output"
             jq -e --arg tag "$tag" --argjson id "$release_id" --argjson pre "$prerelease" \
               '.tag_name==$tag and .id==$id and .prerelease==$pre' "$output" >/dev/null
             resolved=$(git ls-remote "https://github.com/$repository.git" "refs/tags/$tag^{}" | awk 'NR==1{print $1}')
+            if [ -z "$resolved" ]; then
+              resolved=$(git ls-remote "https://github.com/$repository.git" "refs/tags/$tag" | awk 'NR==1{print $1}')
+            fi
             test "$resolved" = "$target"
           }
 

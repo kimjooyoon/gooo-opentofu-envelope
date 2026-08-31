@@ -351,7 +351,9 @@ def show_actions(show: dict[str, Any]) -> tuple[list[dict[str, str]], dict[str, 
             summary["remove"] += 1
         elif action != "noop":
             summary["change"] += 1
-    drift = show.get("resource_drift", [])
+    drift = show.get("resource_drift")
+    if drift is None:
+        drift = []
     if not isinstance(drift, list):
         die("OpenTofu show JSON resource_drift is malformed")
     return sorted(actions, key=lambda item: (item["address"], item["action"])), summary, len(drift)
@@ -456,7 +458,7 @@ def evaluate_cases(plan_match_path: Path, bindings_path: Path, output: Path) -> 
     unknowns = [
         ("unknown-stale-plan", unknown_claim("PLAN", "MATCH_CURRENT_PLAN_INPUT", "STALE_PLAN_INPUT_DIGEST", "DIRECT_MISSING", "REGENERATE_PLAN_FOR_CURRENT_ARTIFACT")),
         ("unknown-inferred-engine", unknown_claim("ENGINE", "BIND_PLAN_ENGINE", "ENGINE_INFERRED_FROM_COMPATIBILITY_FIELD", "DIRECT_MISSING", "CAPTURE_EXPLICIT_OPENTOFU_RELEASE_RECEIPT")),
-        ("unknown-unsupported-json", unknown_claim("PLAN", "READ_PLAN_JSON_UI", "UNSUPPORTED_JSON_UI_MAJOR", "OBSERVATION_UNAVAILABLE", "PIN_SUPPORTED_PLAN_JSON_UI_MAJOR")),
+        ("unknown-unsupported-show-json", unknown_claim("PLAN", "READ_PLAN_SHOW_JSON", "UNSUPPORTED_SHOW_JSON_FORMAT_MAJOR", "OBSERVATION_UNAVAILABLE", "PIN_SUPPORTED_SHOW_JSON_FORMAT")),
     ]
     refuted = [
         ("refuted-ignored-drift", refuted_claim("PLAN", "REJECT_IGNORED_DRIFT", "PLAN_DRIFT_WAS_NOT_INCLUDED_IN_MATCH")),

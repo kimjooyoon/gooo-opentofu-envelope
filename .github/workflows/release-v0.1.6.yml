@@ -1,9 +1,9 @@
-name: Gooo OpenTofu Envelope v0.1.5 Release
+name: Gooo OpenTofu Envelope v0.1.6 Release
 
 on:
   push:
     tags:
-      - 'v0.1.5'
+      - 'v0.1.6'
 
 permissions:
   actions: read
@@ -14,8 +14,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      TAG: v0.1.5
-      CONTRACT: contracts/release-manifest-v0.1.5.json
+      TAG: v0.1.6
+      CONTRACT: contracts/release-manifest-v0.1.6.json
 
     steps:
       - name: Checkout the annotated release tag
@@ -28,7 +28,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          WORK_DIR="$RUNNER_TEMP/gooo-opentofu-envelope-v0.1.5"
+          WORK_DIR="$RUNNER_TEMP/gooo-opentofu-envelope-v0.1.6"
           echo "WORK_DIR=$WORK_DIR" >> "$GITHUB_ENV"
           rm -rf "$WORK_DIR"
           mkdir -p "$WORK_DIR/main-ci" "$WORK_DIR/downloads"
@@ -36,17 +36,18 @@ jobs:
           jq -e '
             .schema=="gooo/opentofu-envelope/release-manifest/v1" and
             .version==1 and
-            .release.tag=="v0.1.5" and
+            .release.tag=="v0.1.6" and
             .release.asset_count_before==0 and
             .release.asset_count_after==4 and
             .release.predecessor_chain==[
               {tag:"v0.1.3",release_id:379957493,release_present:true,immutable:true,asset_count:0},
-              {tag:"v0.1.4",release_id:null,release_present:false,asset_count:0,failed_trigger_counterexample:true,tag_object_sha:"074d8c01282f20efb55460a69a5177a378878f90",target_commit_sha:"480e23a159b533be23811667b68b09562ad4c4f8",failed_trigger_run_ids:[33429443119,33429524144,33429601185]}
+              {tag:"v0.1.4",release_id:null,release_present:false,asset_count:0,failed_trigger_counterexample:true,tag_object_sha:"074d8c01282f20efb55460a69a5177a378878f90",target_commit_sha:"480e23a159b533be23811667b68b09562ad4c4f8",failed_trigger_run_ids:[33429443119,33429524144,33429601185]},
+              {tag:"v0.1.5",release_id:null,release_present:false,asset_count:0,failed_trigger_counterexample:true,tag_object_sha:"1140c6701c65275bdf6e2cd7e801c9f8191b83ed",target_commit_sha:"bdee16c2506c0efdb3c5562f0d4126a293afc26f",failed_trigger_run_ids:[33430206446,33430284845,33430367725,33430500643]}
             ] and
-            .required_assets==["evidence-v0.1.5.tar.gz","manifest-v0.1.5.json","SHA256SUMS","source-v0.1.5.tar.gz"] and
-            .workflow.path==".github/workflows/release-v0.1.5.yml" and
+            .required_assets==["evidence-v0.1.6.tar.gz","manifest-v0.1.6.json","SHA256SUMS","source-v0.1.6.tar.gz"] and
+            .workflow.path==".github/workflows/release-v0.1.6.yml" and
             .workflow.trigger_event=="push" and
-            .workflow.trigger_tags==["v0.1.5"] and
+            .workflow.trigger_tags==["v0.1.6"] and
             .workflow.workflow_dispatch==false and
             .source_identity.tag_must_be_annotated==true and
             .source_identity.tag_target_must_equal_merge_commit==true and
@@ -134,19 +135,29 @@ jobs:
             echo "v0.1.4 release unexpectedly exists" >&2
             exit 1
           fi
+          if gh api "repos/$GITHUB_REPOSITORY/releases/tags/v0.1.5" >/dev/null 2>&1; then
+            echo "v0.1.5 release unexpectedly exists" >&2
+            exit 1
+          fi
           test "$(gh api repos/$GITHUB_REPOSITORY/git/ref/tags/v0.1.4 --jq '.object.type')" = tag
           predecessor_tag_object=$(gh api repos/$GITHUB_REPOSITORY/git/ref/tags/v0.1.4 --jq '.object.sha')
           test "$predecessor_tag_object" = "074d8c01282f20efb55460a69a5177a378878f90"
           predecessor_target=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$predecessor_tag_object" --jq '.object.sha')
           test "$predecessor_target" = "480e23a159b533be23811667b68b09562ad4c4f8"
           test "$(gh api repos/$GITHUB_REPOSITORY/git/ref/tags/v0.1.4 --jq '.object.sha')" != "$tag_commit"
+          predecessor_tag_object=$(gh api repos/$GITHUB_REPOSITORY/git/ref/tags/v0.1.5 --jq '.object.sha')
+          test "$(gh api repos/$GITHUB_REPOSITORY/git/ref/tags/v0.1.5 --jq '.object.type')" = tag
+          test "$predecessor_tag_object" = "1140c6701c65275bdf6e2cd7e801c9f8191b83ed"
+          predecessor_target=$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$predecessor_tag_object" --jq '.object.sha')
+          test "$predecessor_target" = "bdee16c2506c0efdb3c5562f0d4126a293afc26f"
+          test "$(gh api repos/$GITHUB_REPOSITORY/git/ref/tags/v0.1.5 --jq '.object.sha')" != "$tag_commit"
 
           release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>/dev/null || true)
           if [ -z "$release_json" ]; then
             release_json=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
               -f tag_name="$TAG" \
-              -f name="v0.1.5 — durable semantic authority evidence" \
-              -f body="Durable tag-bound evidence for the read-only Gooo semantic graph -> main.tf.json -> pinned OpenTofu validate -json -> independent oracle path. v0.1.3 remains the immutable zero-asset predecessor; v0.1.4 remains the preserved failed-trigger tag with no release." \
+              -f name="v0.1.6 — durable semantic authority evidence" \
+              -f body="Durable tag-bound evidence for the read-only Gooo semantic graph -> main.tf.json -> pinned OpenTofu validate -json -> independent oracle path. v0.1.3 remains the immutable zero-asset predecessor; v0.1.4 and v0.1.5 remain preserved failed-trigger tags with no releases." \
               -F draft=true -F prerelease=false)
           fi
           release_id=$(jq -r '.id' <<< "$release_json")
@@ -173,13 +184,13 @@ jobs:
             {
               schema:"gooo/opentofu-envelope/release-manifest/v1",
               version:1,
-              release:{id:($release_id|tonumber),tag:$tag,commit_sha:$commit,url:("https://github.com/" + $repo + "/releases/tag/" + $tag),immutable_expected:true,asset_count_before:0,asset_count_after:4,predecessor_chain:[{tag:"v0.1.3",release_id:379957493,release_present:true,immutable:true,asset_count:0},{tag:"v0.1.4",release_id:null,release_present:false,asset_count:0,failed_trigger_counterexample:true}]},
+              release:{id:($release_id|tonumber),tag:$tag,commit_sha:$commit,url:("https://github.com/" + $repo + "/releases/tag/" + $tag),immutable_expected:true,asset_count_before:0,asset_count_after:4,predecessor_chain:[{tag:"v0.1.3",release_id:379957493,release_present:true,immutable:true,asset_count:0},{tag:"v0.1.4",release_id:null,release_present:false,asset_count:0,failed_trigger_counterexample:true,tag_object_sha:"074d8c01282f20efb55460a69a5177a378878f90",target_commit_sha:"480e23a159b533be23811667b68b09562ad4c4f8",failed_trigger_run_ids:[33429443119,33429524144,33429601185]},{tag:"v0.1.5",release_id:null,release_present:false,asset_count:0,failed_trigger_counterexample:true,tag_object_sha:"1140c6701c65275bdf6e2cd7e801c9f8191b83ed",target_commit_sha:"bdee16c2506c0efdb3c5562f0d4126a293afc26f",failed_trigger_run_ids:[33430206446,33430284845,33430367725,33430500643]}]},
               asset_count_before:0,
               asset_count_after:4,
-              required_assets:["evidence-v0.1.5.tar.gz","manifest-v0.1.5.json","SHA256SUMS","source-v0.1.5.tar.gz"],
+              required_assets:["evidence-v0.1.6.tar.gz","manifest-v0.1.6.json","SHA256SUMS","source-v0.1.6.tar.gz"],
               source_identity:{tag:$tag,tag_commit_sha:$commit,source_sha256:$source_sha,main_ci_head_sha:$commit,main_ci_observation_source_sha:$o.subject.source_sha256},
               main_ci:{run_id:($run_id|tonumber),url:$run_url,artifact_id:($artifact_id|tonumber),artifact_name:$artifact_name,artifact_digest:$artifact_digest,observation_sha256:null},
-              workflow:{path:".github/workflows/release-v0.1.5.yml",trigger_event:"push",trigger_tags:["v0.1.5"],workflow_dispatch:false},
+              workflow:{path:".github/workflows/release-v0.1.6.yml",trigger_event:"push",trigger_tags:["v0.1.6"],workflow_dispatch:false},
               pipeline:{evidence_source:"SUCCESSFUL_MAIN_CI_ARTIFACT",semantic_path:["RELEASED_GOOO_GRAPH","main.tf.json","PINNED_OPENTOFU_VALIDATE_JSON","INDEPENDENT_SERVICE_ORACLE"],reproduced_without_local_execution:true},
               toolchain:{go_requirement:$o.toolchain.go_requirement,go_version_evidence:$o.toolchain.go_version_evidence},
               denominator:{target_cells:12,expected_user_path_steps:5,binding_edges:14,proof_counts:{FOUNDATION:4,COHERENCE:4,REGRESSION:4},indicator_counts:{DRIVER:4,OUTCOME:4,GUARDRAIL:4},contract:$denominator[0]},
@@ -188,12 +199,12 @@ jobs:
               authority:{semantic_graph_authority:{state:"CLOSED",scope:"GOOO_SEMANTIC_GRAPH_ONLY",evidence:$o.semantic_authority},external_utility:$o.utility,global_core_authority_claim:"NOT_MADE",mutation_counts:$o.mutation_counts,authority:$o.authority,reuse_contract:$o.reuse_contract,test_counts:$o.test_counts},
               observations:{subject:$o.subject,semantic_oracle_match:$o.semantic_oracle_match,validation:$o.validation,contract_receipt:$o.contract_receipt,replay:$o.replay,generated_outputs:$o.generated_outputs,repository_inventory:$o.repository_inventory},
               identity:$o.identity,
-              checksum_contract:{sha256sums_lists:["evidence-v0.1.5.tar.gz","manifest-v0.1.5.json","source-v0.1.5.tar.gz"],sha256sums_excludes_self:true,server_asset_digest_and_download_digest_must_match:true}
-            }' > "$WORK_DIR/manifest-v0.1.5.json"
+              checksum_contract:{sha256sums_lists:["evidence-v0.1.6.tar.gz","manifest-v0.1.6.json","source-v0.1.6.tar.gz"],sha256sums_excludes_self:true,server_asset_digest_and_download_digest_must_match:true}
+            }' > "$WORK_DIR/manifest-v0.1.6.json"
 
           observation_sha=$(sha256sum "$WORK_DIR/main-ci/observation.json" | awk '{print $1}')
-          jq --arg sha "$observation_sha" '.main_ci.observation_sha256=$sha' "$WORK_DIR/manifest-v0.1.5.json" > "$WORK_DIR/manifest-v0.1.5.json.tmp"
-          mv "$WORK_DIR/manifest-v0.1.5.json.tmp" "$WORK_DIR/manifest-v0.1.5.json"
+          jq --arg sha "$observation_sha" '.main_ci.observation_sha256=$sha' "$WORK_DIR/manifest-v0.1.6.json" > "$WORK_DIR/manifest-v0.1.6.json.tmp"
+          mv "$WORK_DIR/manifest-v0.1.6.json.tmp" "$WORK_DIR/manifest-v0.1.6.json"
 
       - name: Create four caller-owned temporary release assets
         shell: bash
@@ -202,14 +213,14 @@ jobs:
           tag_commit=$(cat "$WORK_DIR/tag-commit")
           mkdir -p "$WORK_DIR/evidence-package"
           cp -R "$WORK_DIR/main-ci/." "$WORK_DIR/evidence-package/"
-          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf "$WORK_DIR/evidence-v0.1.5.tar.gz" -C "$WORK_DIR/evidence-package" .
-          git archive --format=tar.gz --prefix="gooo-opentofu-envelope-v0.1.5/" "$tag_commit" > "$WORK_DIR/source-v0.1.5.tar.gz"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf "$WORK_DIR/evidence-v0.1.6.tar.gz" -C "$WORK_DIR/evidence-package" .
+          git archive --format=tar.gz --prefix="gooo-opentofu-envelope-v0.1.6/" "$tag_commit" > "$WORK_DIR/source-v0.1.6.tar.gz"
           {
-            sha256sum "$WORK_DIR/evidence-v0.1.5.tar.gz"
-            sha256sum "$WORK_DIR/manifest-v0.1.5.json"
-            sha256sum "$WORK_DIR/source-v0.1.5.tar.gz"
+            sha256sum "$WORK_DIR/evidence-v0.1.6.tar.gz"
+            sha256sum "$WORK_DIR/manifest-v0.1.6.json"
+            sha256sum "$WORK_DIR/source-v0.1.6.tar.gz"
           } | sed "s#  $WORK_DIR/#  #" > "$WORK_DIR/SHA256SUMS"
-          for asset in evidence-v0.1.5.tar.gz manifest-v0.1.5.json SHA256SUMS source-v0.1.5.tar.gz; do
+          for asset in evidence-v0.1.6.tar.gz manifest-v0.1.6.json SHA256SUMS source-v0.1.6.tar.gz; do
             test -s "$WORK_DIR/$asset"
           done
           jq -e --arg commit "$tag_commit" --arg tag "$TAG" '
@@ -223,7 +234,7 @@ jobs:
             .authority.semantic_graph_authority.scope=="GOOO_SEMANTIC_GRAPH_ONLY" and
             .authority.external_utility.state=="UNKNOWN" and
             .authority.global_core_authority_claim=="NOT_MADE"
-          ' "$WORK_DIR/manifest-v0.1.5.json" >/dev/null
+          ' "$WORK_DIR/manifest-v0.1.6.json" >/dev/null
 
       - name: Upload exactly four assets to the draft release
         shell: bash
@@ -233,7 +244,7 @@ jobs:
           release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")
           test "$(jq -r '.tag_name' <<< "$release_json")" = "$TAG"
           test "$(jq -r '.draft' <<< "$release_json")" = true
-          for asset in evidence-v0.1.5.tar.gz manifest-v0.1.5.json SHA256SUMS source-v0.1.5.tar.gz; do
+          for asset in evidence-v0.1.6.tar.gz manifest-v0.1.6.json SHA256SUMS source-v0.1.6.tar.gz; do
             gh api --method POST \
               -H 'Content-Type: application/octet-stream' \
               "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$asset" \
@@ -251,12 +262,12 @@ jobs:
           jq -e --arg tag "$TAG" '
             .tag_name==$tag and .draft==false and .prerelease==false and .immutable==true and
             (.assets|length)==4 and
-            ([.assets[].name]|sort)==["SHA256SUMS","evidence-v0.1.5.tar.gz","manifest-v0.1.5.json","source-v0.1.5.tar.gz"]
+            ([.assets[].name]|sort)==["SHA256SUMS","evidence-v0.1.6.tar.gz","manifest-v0.1.6.json","source-v0.1.6.tar.gz"]
           ' <<< "$release_json" >/dev/null
 
           assets_json=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100")
           verified_assets='[]'
-          for asset in evidence-v0.1.5.tar.gz manifest-v0.1.5.json SHA256SUMS source-v0.1.5.tar.gz; do
+          for asset in evidence-v0.1.6.tar.gz manifest-v0.1.6.json SHA256SUMS source-v0.1.6.tar.gz; do
             local_size=$(wc -c < "$WORK_DIR/$asset" | tr -d ' ')
             local_sha=$(sha256sum "$WORK_DIR/$asset" | awk '{print $1}')
             asset_json=$(jq -c --arg name "$asset" 'map(select(.name==$name)) | if length==1 then .[0] else error("asset missing or duplicated") end' <<< "$assets_json")
@@ -275,3 +286,4 @@ jobs:
             '{schema:"gooo/opentofu-envelope/release-verification/v1",release:{id:$release.id,tag:$release.tag_name,url:$release.html_url,immutable:$release.immutable,asset_count:($release.assets|length)},assets:$assets}' \
             > "$WORK_DIR/release-verification.json"
           cat "$WORK_DIR/release-verification.json" >> "$GITHUB_STEP_SUMMARY"
+

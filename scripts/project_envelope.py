@@ -45,9 +45,9 @@ ENTITY_NAMES = [
     "ReadOnlyObservation",
 ]
 ACTIVITY_INPUTS = {
-    "DeclareProjectResourceIntent": set(),
-    "DeclareServiceCapability": set(),
-    "DeclareServiceEndpoint": set(),
+    "DeclareProjectResourceIntent": {"ProjectResourceIntent"},
+    "DeclareServiceCapability": {"ServiceCapability"},
+    "DeclareServiceEndpoint": {"ServiceEndpoint"},
     "BindResourceCapability": {"ResourceContract", "CapabilityContract"},
     "BindCapabilityEndpoint": {"CapabilityContract", "EndpointContract"},
     "GenerateOpenTofuServiceProject": {"ResourceCapabilityBinding", "CapabilityEndpointBinding"},
@@ -329,9 +329,9 @@ def generated_artifact(model: dict[str, Any]) -> dict[str, Any]:
             "endpoint_orders": {"input": {"path": "/orders", "port": 8080, "capability": "checkout-http"}},
         }},
         "output": {
-            "project_name": {"value": "\${terraform_data.project.output.name}"},
-            "service_capabilities": {"value": "\${terraform_data.project.output.capabilities}"},
-            "service_endpoints": {"value": "\${terraform_data.project.output.endpoints}"},
+            "project_name": {"value": "$" + "{terraform_data.project.output.name}"},
+            "service_capabilities": {"value": "$" + "{terraform_data.project.output.capabilities}"},
+            "service_endpoints": {"value": "$" + "{terraform_data.project.output.endpoints}"},
         },
     }
 

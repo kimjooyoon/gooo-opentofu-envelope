@@ -481,7 +481,9 @@ def generate(source_path: Path, graph_path: Path, lock_path: Path, spec_path: Pa
 def unknown_claim(stage: str, step: str, reason: str, unknown_class: str, next_operation: str, blocked_by: list[str] | None = None) -> dict[str, Any]:
     if unknown_class not in {"DIRECT_MISSING", "OBSERVATION_UNAVAILABLE"}:
         die("unsupported unknown class")
-    if not isinstance(blocked_by, list):
+    if blocked_by is None:
+        blocked_by = []
+    elif not isinstance(blocked_by, list):
         die("UNKNOWN blocked_by must be an array")
     return {"state": "UNKNOWN", "stage": stage, "step": step, "reason": reason, "unknown_class": unknown_class, "next_operation": next_operation, "blocked_by": blocked_by}
 

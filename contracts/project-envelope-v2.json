@@ -1,0 +1,27 @@
+{
+  "schema": "gooo/opentofu-envelope/project-denominator/v2",
+  "version": 2,
+  "target_cells": 12,
+  "expected_user_path_steps": 6,
+  "expected_output_files": [
+    "contract-receipt.json",
+    "dossier.md",
+    "main.tf.json",
+    "relation-report.md",
+    "service-contract.json"
+  ],
+  "cells": [
+    {"ordinal": 1, "id": "RESOURCE_INTENT_DECLARED", "activity": "DeclareProjectResourceIntent", "stage": "INPUT", "step": "DECLARE_INFRASTRUCTURE_RESOURCE_INTENT", "proof_family": "FOUNDATION", "indicator": "DRIVER", "depends_on": []},
+    {"ordinal": 2, "id": "SERVICE_CAPABILITY_DECLARED", "activity": "DeclareServiceCapability", "stage": "INPUT", "step": "DECLARE_SERVICE_CAPABILITY", "proof_family": "FOUNDATION", "indicator": "DRIVER", "depends_on": []},
+    {"ordinal": 3, "id": "SERVICE_ENDPOINT_DECLARED", "activity": "DeclareServiceEndpoint", "stage": "INPUT", "step": "DECLARE_SERVICE_ENDPOINT", "proof_family": "FOUNDATION", "indicator": "DRIVER", "depends_on": []},
+    {"ordinal": 4, "id": "RESOURCE_CAPABILITY_BOUND", "activity": "BindResourceCapability", "stage": "BINDING", "step": "BIND_RESOURCE_TO_CAPABILITY", "proof_family": "FOUNDATION", "indicator": "DRIVER", "depends_on": ["RESOURCE_INTENT_DECLARED", "SERVICE_CAPABILITY_DECLARED"]},
+    {"ordinal": 5, "id": "CAPABILITY_ENDPOINT_BOUND", "activity": "BindCapabilityEndpoint", "stage": "BINDING", "step": "BIND_CAPABILITY_TO_ENDPOINT", "proof_family": "COHERENCE", "indicator": "OUTCOME", "depends_on": ["SERVICE_CAPABILITY_DECLARED", "SERVICE_ENDPOINT_DECLARED"]},
+    {"ordinal": 6, "id": "OPENTOFU_PROJECT_GENERATED", "activity": "GenerateOpenTofuServiceProject", "stage": "GENERATION", "step": "GENERATE_OPENTOFU_SERVICE_PROJECT", "proof_family": "COHERENCE", "indicator": "OUTCOME", "depends_on": ["RESOURCE_CAPABILITY_BOUND", "CAPABILITY_ENDPOINT_BOUND"]},
+    {"ordinal": 7, "id": "SERVICE_CONTRACT_GENERATED", "activity": "GenerateServiceContract", "stage": "GENERATION", "step": "GENERATE_SERVICE_CONTRACT_JSON", "proof_family": "COHERENCE", "indicator": "OUTCOME", "depends_on": ["OPENTOFU_PROJECT_GENERATED"]},
+    {"ordinal": 8, "id": "RELATION_REPORT_GENERATED", "activity": "GenerateRelationReport", "stage": "GENERATION", "step": "GENERATE_HUMAN_RELATION_REPORT", "proof_family": "COHERENCE", "indicator": "OUTCOME", "depends_on": ["SERVICE_CONTRACT_GENERATED"]},
+    {"ordinal": 9, "id": "PROJECT_VALIDATED", "activity": "ValidateGeneratedServiceProject", "stage": "VALIDATION", "step": "VALIDATE_GENERATED_PROJECT", "proof_family": "REGRESSION", "indicator": "GUARDRAIL", "depends_on": ["SERVICE_CONTRACT_GENERATED", "RELATION_REPORT_GENERATED"]},
+    {"ordinal": 10, "id": "SCENARIO_EVIDENCE_EVALUATED", "activity": "EvaluateScenarioEvidence", "stage": "CONFORMANCE", "step": "CLASSIFY_NORMAL_UNKNOWN_REFUTED_EXAMPLES", "proof_family": "REGRESSION", "indicator": "GUARDRAIL", "depends_on": ["PROJECT_VALIDATED"]},
+    {"ordinal": 11, "id": "REPLAY_VERIFIED", "activity": "VerifyDeterministicReplay", "stage": "REPLAY", "step": "VERIFY_GENERATED_PROJECT_REPLAY", "proof_family": "REGRESSION", "indicator": "GUARDRAIL", "depends_on": ["PROJECT_VALIDATED"]},
+    {"ordinal": 12, "id": "READ_ONLY_BOUNDARY", "activity": "PreserveReadOnlyBoundary", "stage": "AUTHORITY", "step": "PRESERVE_READ_ONLY_PROJECT_BOUNDARY", "proof_family": "REGRESSION", "indicator": "GUARDRAIL", "depends_on": ["SCENARIO_EVIDENCE_EVALUATED", "REPLAY_VERIFIED"]}
+  ]
+}

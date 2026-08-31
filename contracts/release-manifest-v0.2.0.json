@@ -1,0 +1,135 @@
+{
+  "schema": "gooo/opentofu-envelope/release-contract/v2",
+  "version": 2,
+  "release": {
+    "tag": "v0.2.0",
+    "asset_count_before": 0,
+    "asset_count_after": 4,
+    "required_assets": [
+      "evidence-v0.2.0.tar.gz",
+      "manifest-v0.2.0.json",
+      "SHA256SUMS",
+      "source-v0.2.0.tar.gz"
+    ]
+  },
+  "predecessor_chain": [
+    {
+      "tag": "v0.1.3",
+      "release_id": 379957493,
+      "release_present": true,
+      "draft": false,
+      "immutable": true,
+      "asset_count": 0,
+      "target_commit_sha": "e506740a14bdbde8225e2630a9837c387ae4f216"
+    },
+    {
+      "tag": "v0.1.4",
+      "release_id": null,
+      "release_present": false,
+      "asset_count": 0,
+      "failed_trigger_counterexample": true,
+      "tag_object_sha": "074d8c01282f20efb55460a69a5177a378878f90",
+      "target_commit_sha": "480e23a159b533be23811667b68b09562ad4c4f8",
+      "failed_trigger_run_ids": [33429443119, 33429524144, 33429601185]
+    },
+    {
+      "tag": "v0.1.5",
+      "release_id": null,
+      "release_present": false,
+      "asset_count": 0,
+      "failed_trigger_counterexample": true,
+      "tag_object_sha": "1140c6701c65275bdf6e2cd7e801c9f8191b83ed",
+      "target_commit_sha": "bdee16c2506c0efdb3c5562f0d4126a293afc26f8",
+      "failed_trigger_run_ids": [33430206446, 33430284845, 33430367725, 33430500643]
+    },
+    {
+      "tag": "v0.1.6",
+      "release_id": null,
+      "release_present": false,
+      "asset_count": 0,
+      "failed_trigger_counterexample": true,
+      "tag_object_sha": "cbe70a19dbf547868f907cb51954b66a0f774e66",
+      "target_commit_sha": "744e32655c6a6d1adf8c31d334814b555bce1a69",
+      "failed_trigger_run_ids": [33431118426]
+    },
+    {
+      "tag": "v0.1.7",
+      "release_id": null,
+      "release_present": false,
+      "asset_count": 0,
+      "failed_trigger_counterexample": true,
+      "tag_object_sha": "1c3a06733538dc5f4ae3ec143c838984615e68d1",
+      "target_commit_sha": "a1682d56ec5d5c6ce5aaf1263a157a981d0e7e79",
+      "failed_trigger_run_ids": [33431644645]
+    },
+    {
+      "tag": "v0.1.8",
+      "release_id": 380007644,
+      "release_present": true,
+      "draft": true,
+      "immutable": false,
+      "asset_count": 0,
+      "failed_trigger_counterexample": true,
+      "tag_object_sha": "79a59ed5edb82a0d7d234525f897207ed3a59247",
+      "target_commit_sha": "4d04baa3dc0157a27f4fca2c3f4e3a9f929953c9",
+      "failed_trigger_run_ids": [33432034362]
+    },
+    {
+      "tag": "v0.1.9",
+      "release_id": 380009987,
+      "release_present": true,
+      "draft": false,
+      "immutable": true,
+      "asset_count": 4,
+      "tag_object_sha": "8f913ac3bcef39a5105280a6a05114b7abc3ac87",
+      "target_commit_sha": "b482afd68a864400a209cb4f439e727cfdfe2eda"
+    }
+  ],
+  "workflow": {
+    "path": ".github/workflows/release-v0.2.0.yml",
+    "trigger_event": "push",
+    "trigger_tags": ["v0.2.0"],
+    "workflow_dispatch": false
+  },
+  "pipeline": {
+    "evidence_source": "SUCCESSFUL_MAIN_CI_ARTIFACT",
+    "semantic_path": [
+      "GOOO_SOURCE",
+      "SEMANTIC_GRAPH",
+      "GENERATED_OPENTOFU_TF_JSON",
+      "GENERATED_SERVICE_CONTRACT_JSON",
+      "PINNED_OPENTOFU_VALIDATE_JSON",
+      "RELATION_EVIDENCE"
+    ],
+    "release_local_execution_count": 0,
+    "post_bootstrap_direct_main_mutations": 0
+  },
+  "toolchain": {
+    "go_requirement": "1.27.x",
+    "opentofu_engine": "OPENTOFU",
+    "opentofu_version": "1.12.6"
+  },
+  "authority": {
+    "scope": "GENERATED_OPENTOFU_SERVICE_PROJECT_ONLY",
+    "semantic_graph_state": "CLOSED",
+    "external_utility": "UNKNOWN",
+    "global_core_authority_claim": "NOT_MADE",
+    "handwritten_go_physical_files": 0
+  },
+  "source_identity": {
+    "tag_commit_matches_source_revision": true,
+    "main_ci_head_matches_tag_commit": true,
+    "observation_source_sha_matches_tag_source_sha": true,
+    "service_contract_source_sha_matches_tag_source_sha": true
+  },
+  "checksum_contract": {
+    "algorithm": "sha256",
+    "sha256sums_lists": [
+      "evidence-v0.2.0.tar.gz",
+      "manifest-v0.2.0.json",
+      "source-v0.2.0.tar.gz"
+    ],
+    "sha256sums_excludes_self": true,
+    "server_asset_digest_and_download_digest_must_match": true
+  }
+}

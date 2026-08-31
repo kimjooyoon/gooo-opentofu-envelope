@@ -1,39 +1,46 @@
-package opentofuenvelope
-namespace opentofuenvelope
+package generatedserviceproject
+namespace generatedserviceproject
 
-entity ServiceInfrastructureContract id "envelope://opentofu/service/web/contract"
-entity ServicePortContract id "envelope://opentofu/service/web/port"
-entity OpenTofuSpecBinding id "envelope://opentofu/service/web/spec-binding"
-entity OpenTofuJSONSpecReceipt id "envelope://opentofu/service/web/spec-receipt"
-entity OpenTofuArtifact id "envelope://opentofu/service/web/main-tf-json"
-entity HumanDossier id "envelope://opentofu/service/web/dossier"
-entity NormalVerification id "envelope://opentofu/service/web/normal-verification"
-entity OpenTofuValidationReceipt id "envelope://opentofu/service/web/validate-receipt"
-entity SemanticOracleMatch id "envelope://opentofu/service/web/oracle-match"
-entity UnknownCase id "envelope://opentofu/service/web/unknown"
-entity RefutedCase id "envelope://opentofu/service/web/refuted"
-entity ReplayVerification id "envelope://opentofu/service/web/replay"
-entity ReadOnlyObservation id "envelope://opentofu/service/web/read-only"
+entity ProjectResourceIntent id "gooo://project/checkout-api/resource-intent"
+entity ServiceCapability id "gooo://project/checkout-api/service-capability"
+entity ServiceEndpoint id "gooo://project/checkout-api/service-endpoint"
+entity ResourceContract id "gooo://project/checkout-api/resource-contract"
+entity CapabilityContract id "gooo://project/checkout-api/capability-contract"
+entity EndpointContract id "gooo://project/checkout-api/endpoint-contract"
+entity ResourceCapabilityBinding id "gooo://project/checkout-api/resource-capability-binding"
+entity CapabilityEndpointBinding id "gooo://project/checkout-api/capability-endpoint-binding"
+entity OpenTofuProjectArtifact id "gooo://project/checkout-api/main-tf-json"
+entity ServiceContractArtifact id "gooo://project/checkout-api/service-contract-json"
+entity RelationReportArtifact id "gooo://project/checkout-api/relation-report"
+entity ValidationEvidence id "gooo://project/checkout-api/validation-evidence"
+entity ScenarioEvidence id "gooo://project/checkout-api/scenario-evidence"
+entity ReplayEvidence id "gooo://project/checkout-api/replay-evidence"
+entity ReadOnlyObservation id "gooo://project/checkout-api/read-only"
 
-// @service name=web type=http port=8080
-// @environment name=APP_ENV type=string value=production
-// @required_output name=service_url type=string
-// @required_output name=service_port type=number
-// @required_output name=service_type type=string
-// @relation subject=service predicate=declares object=service_port
-// @relation subject=service predicate=declares object=service_type
-// @relation subject=service predicate=requires object=service_url
-// @relation subject=environment predicate=configures object=service
+// @project name=checkout-api environment=production
+// @resource name=checkout-web kind=service image=registry.example/checkout-web:1.0
+// @resource name=checkout-worker kind=worker image=registry.example/checkout-worker:1.0
+// @capability name=checkout-http protocol=http
+// @endpoint name=health capability=checkout-http path=/health port=8080
+// @endpoint name=orders capability=checkout-http path=/orders port=8080
+// @binding resource=checkout-web capability=checkout-http endpoint=health
+// @binding resource=checkout-web capability=checkout-http endpoint=orders
+// @scenario id=normal-health class=NORMAL resource=checkout-web capability=checkout-http endpoint=health
+// @scenario id=normal-orders class=NORMAL resource=checkout-web capability=checkout-http endpoint=orders
+// @scenario id=unknown-missing-worker-binding class=UNKNOWN resource=checkout-worker capability=checkout-http endpoint=health reason=MISSING_SERVICE_BINDING
+// @scenario id=unknown-missing-admin-binding class=UNKNOWN resource=checkout-web capability=checkout-http endpoint=admin reason=MISSING_SERVICE_BINDING
+// @scenario id=refuted-health-port class=REFUTED resource=checkout-web capability=checkout-http endpoint=health expected_port=8080 observed_port=9090 reason=CONTRADICTORY_RESOURCE_ENDPOINT_MAPPING
+// @scenario id=refuted-orders-capability class=REFUTED resource=checkout-web capability=checkout-http endpoint=orders expected_capability=checkout-http observed_capability=checkout-grpc reason=CONTRADICTORY_RESOURCE_ENDPOINT_MAPPING
 
-activity DeclareGoooInfrastructureIntent(ServiceInfrastructureContract) -> ServicePortContract
-activity BindGoooIntentToOpenTofu(ServicePortContract) -> OpenTofuSpecBinding
-activity ConsumePinnedOpenTofuJSONSpec(OpenTofuSpecBinding) -> OpenTofuJSONSpecReceipt
-activity GenerateOpenTofuCompatibleArtifact(OpenTofuJSONSpecReceipt) -> OpenTofuArtifact
-activity GenerateHumanDossier(OpenTofuArtifact) -> HumanDossier
-activity VerifyGeneratedOutputs(HumanDossier) -> NormalVerification
-activity GenerateOpenTofuValidationReceipt(NormalVerification) -> OpenTofuValidationReceipt
-activity MatchGoooIntentToIndependentOracle(OpenTofuValidationReceipt) -> SemanticOracleMatch
-activity PreserveUnknownCase(SemanticOracleMatch) -> UnknownCase
-activity RefuteContradictionCase(SemanticOracleMatch) -> RefutedCase
-activity VerifyDeterministicReplay(NormalVerification) -> ReplayVerification
-activity PreserveReadOnlyBoundary(UnknownCase, RefutedCase, ReplayVerification, SemanticOracleMatch) -> ReadOnlyObservation
+activity DeclareProjectResourceIntent(ProjectResourceIntent) -> ResourceContract
+activity DeclareServiceCapability(ServiceCapability) -> CapabilityContract
+activity DeclareServiceEndpoint(ServiceEndpoint) -> EndpointContract
+activity BindResourceCapability(ResourceContract, CapabilityContract) -> ResourceCapabilityBinding
+activity BindCapabilityEndpoint(CapabilityContract, EndpointContract) -> CapabilityEndpointBinding
+activity GenerateOpenTofuServiceProject(ResourceCapabilityBinding, CapabilityEndpointBinding) -> OpenTofuProjectArtifact
+activity GenerateServiceContract(OpenTofuProjectArtifact) -> ServiceContractArtifact
+activity GenerateRelationReport(ServiceContractArtifact) -> RelationReportArtifact
+activity ValidateGeneratedServiceProject(ServiceContractArtifact, RelationReportArtifact) -> ValidationEvidence
+activity EvaluateScenarioEvidence(ValidationEvidence) -> ScenarioEvidence
+activity VerifyDeterministicReplay(ValidationEvidence) -> ReplayEvidence
+activity PreserveReadOnlyBoundary(ScenarioEvidence, ReplayEvidence) -> ReadOnlyObservation

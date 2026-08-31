@@ -139,3 +139,17 @@ No exact before/after observation exists, so improvement remains UNKNOWN.
 Release-time validation consumes the successful main CI artifact, executes no
 local tests, builds, or OpenTofu commands, and preserves the v0.1.3–v0.1.9
 history and failed-trigger evidence.
+
+The first v0.2.0 tag is intentionally preserved as REFUTED: annotated tag
+object `9dfdee84d61f3acbe899b5ad57fd8f35f8159210` points to
+`c9f5de0b33fee1ca8546a627a8a94242b99c0733`, release creation stopped before
+publishing, and no v0.2.0 release exists. Its failed release run is
+`33435908822`. The cause is a one-character overage in the preserved
+v0.1.5 target contract; the corrected target is
+`bdee16c2506c0efdb3c5562f0d4126a293afc26f`, while the rejected overage was
+`bdee16c2506c0efdb3c5562f0d4126a293afc26f8`.
+
+v0.2.1 is the corrective immutable release path. Its tag-only workflow
+rechecks the exact historical target, the v0.2.0 REFUTED/no-release state,
+the successful main CI artifact, and the same source → semantic graph →
+generated project → pinned OpenTofu validation → relation evidence chain.

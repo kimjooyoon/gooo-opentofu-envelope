@@ -140,6 +140,17 @@ jobs:
           python3 scripts/project_envelope.py inventory --root . --output "$WORK_DIR/inventory.json"
           jq -e '.root_readme_excluded==true and .go_physical_files==0 and .gooo_physical_files==1' "$WORK_DIR/inventory.json" >/dev/null
 
+      - name: Recheck the v0.1.5 historical target overage counterexample
+        shell: bash
+        run: |
+          set -euo pipefail
+          exact_target=bdee16c2506c0efdb3c5562f0d4126a293afc26f
+          overage_target=bdee16c2506c0efdb3c5562f0d4126a293afc26f8
+          jq -e --arg exact "$exact_target" --arg overage "$overage_target" '
+            .predecessor_chain[] | select(.tag=="v0.1.5") |
+            .target_commit_sha==$exact and (.target_commit_sha|length)==40 and .target_commit_sha!=$overage
+          ' contracts/release-manifest-v0.2.0.json >/dev/null
+
       - name: Generate the OpenTofu project and service evidence
         shell: bash
         run: |

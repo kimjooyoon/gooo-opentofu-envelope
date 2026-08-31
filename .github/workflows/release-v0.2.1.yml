@@ -1,0 +1,185 @@
+name: Release v0.2.1 Generated Service Project
+
+on:
+  push:
+    tags:
+      - v0.2.1
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v0.2.1
+      WORK_DIR: /tmp/gooo-release-v0.2.1
+
+    steps:
+      - name: Checkout the annotated release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve the successful main CI artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$WORK_DIR"
+          mkdir -p "$WORK_DIR/main-ci" "$WORK_DIR/assets"
+          contract=contracts/release-manifest-v0.2.1.json
+          jq -e '
+            .schema=="gooo/opentofu-envelope/release-contract/v2" and .version==2 and
+            .release.tag=="v0.2.1" and .release.asset_count_before==0 and .release.asset_count_after==4 and
+            (.release.required_assets|sort)==["SHA256SUMS","evidence-v0.2.1.tar.gz","manifest-v0.2.1.json","source-v0.2.1.tar.gz"] and
+            .workflow.path==".github/workflows/release-v0.2.1.yml" and .workflow.trigger_event=="push" and
+            .workflow.trigger_tags==["v0.2.1"] and .workflow.workflow_dispatch==false and
+            .pipeline.evidence_source=="SUCCESSFUL_MAIN_CI_ARTIFACT" and .pipeline.release_local_execution_count==0 and
+            .pipeline.post_bootstrap_direct_main_mutations==0 and .toolchain.go_requirement=="1.27.x" and
+            .toolchain.opentofu_engine=="OPENTOFU" and .toolchain.opentofu_version=="1.12.6" and
+            .authority.scope=="GENERATED_OPENTOFU_SERVICE_PROJECT_ONLY" and .authority.semantic_graph_state=="CLOSED" and
+            .authority.external_utility=="UNKNOWN" and .authority.global_core_authority_claim=="NOT_MADE" and
+            .authority.handwritten_go_physical_files==0 and .checksum_contract.algorithm=="sha256" and
+            .checksum_contract.sha256sums_excludes_self==true
+          ' "$contract" >/dev/null
+          test "$(git cat-file -t "$TAG^{tag}")" = tag
+          tag_commit=$(git rev-list -n 1 "$TAG")
+          source_sha=$(sha256sum examples/intent/main.gooo | awk '{print $1}')
+          exact_target=bdee16c2506c0efdb3c5562f0d4126a293afc26f
+          overage_target=bdee16c2506c0efdb3c5562f0d4126a293afc26f8
+          jq -e --arg exact "$exact_target" --arg overage "$overage_target" '.predecessor_chain[]|select(.tag=="v0.1.5")|.target_commit_sha==$exact and (.target_commit_sha|length)==40 and .target_commit_sha!=$overage' "$contract" >/dev/null
+          repo="$GITHUB_REPOSITORY"
+          runs_json=$(gh api --paginate "repos/$repo/actions/runs?event=push&branch=main&per_page=100")
+          main_run=$(jq -c --arg name "Gooo OpenTofu Generated Service Project" --arg sha "$tag_commit" '[.workflow_runs[]|select(.name==$name and .head_sha==$sha and .event=="push" and .status=="completed" and .conclusion=="success")]|sort_by(.id)|last' <<< "$runs_json")
+          test "$main_run" != null
+          main_run_id=$(jq -r '.id' <<< "$main_run")
+          artifact_name="gooo-generated-service-project-evidence-${tag_commit}"
+          artifacts_json=$(gh api --paginate "repos/$repo/actions/runs/$main_run_id/artifacts?per_page=100")
+          artifact=$(jq -c --arg name "$artifact_name" '[.artifacts[]|select(.name==$name and .expired==false)]|sort_by(.created_at)|last' <<< "$artifacts_json")
+          test "$artifact" != null
+          artifact_id=$(jq -r '.id' <<< "$artifact")
+          artifact_digest=$(jq -r '.digest' <<< "$artifact")
+          test -n "$artifact_id" && test "$artifact_digest" != null
+          gh api "repos/$repo/actions/artifacts/$artifact_id/zip" > "$WORK_DIR/main-ci-artifact.zip"
+          unzip -q "$WORK_DIR/main-ci-artifact.zip" -d "$WORK_DIR/main-ci"
+          test -f "$WORK_DIR/main-ci/observation.json"
+          test -f "$WORK_DIR/main-ci/consumer-verification.json"
+          jq -e --arg sha "$source_sha" --slurpfile c "$contract" '
+            .schema=="gooo/opentofu-envelope/project-observation/v1" and .state=="CLOSED" and .source.sha256==$sha and
+            .authority.semantic_scope=="GENERATED_OPENTOFU_SERVICE_PROJECT_ONLY" and .authority.semantic_graph_state=="CLOSED" and
+            .authority.handwritten_go_physical_files==0 and .authority.repository_writes==0 and .authority.local_tests==0 and .authority.local_build==0 and
+            .authority.opentofu=={init:0,validate:1,plan:0,apply:0,destroy:0,provider_install:0} and .authority.network==0 and
+            .authority.infrastructure_mutations==0 and .authority.state_mutations==0 and .authority.external_mutations==0 and
+            .project=={name:"checkout-api",resources:2,service_capabilities:1,service_endpoints:2,declared_bindings:2,bound_relations:2,unbound_relations:2,refuted_relations:2,opentofu_resources:3,opentofu_modules:0} and
+            .test_counts=={total:6,executed:6,reused:0,failed:2,unknown:2,passed:2} and
+            .cases.state=="CLOSED" and .cases.count==6 and .cases.outcome_counts=={BOUND:2,UNBOUND_UNKNOWN:2,REFUTED:2} and
+            .cases.precedence==["REFUTED","UNKNOWN","CLOSED"] and .replay.state=="CLOSED" and .replay.comparison_count==4 and
+            .generated_outputs.count==5 and .improvement.state=="UNKNOWN" and .utility.state=="UNKNOWN" and .identity.source_sha256==$sha
+          ' "$WORK_DIR/main-ci/observation.json" >/dev/null
+          jq -e '
+            .schema=="gooo/opentofu-envelope/independent-consumer/v1" and .state=="CLOSED" and
+            .authority.semantic_scope=="GENERATED_OPENTOFU_SERVICE_PROJECT_ONLY" and .authority.handwritten_go_physical_files==0 and
+            .relation_counts=={bound:2,unbound_unknown:2,refuted:2} and
+            .digest_chain.order==["SOURCE","SEMANTIC_GRAPH","GENERATED_FILES","PINNED_OPENTOFU_VALIDATE_JSON","RELATION_EVIDENCE"]
+          ' "$WORK_DIR/main-ci/consumer-verification.json" >/dev/null
+
+          verify_tag_target() {
+            local tag=$1 expected=$2
+            local ref object
+            ref=$(gh api "repos/$repo/git/ref/tags/$tag")
+            test "$(jq -r '.object.type' <<< "$ref")" = tag
+            object=$(jq -r '.object.sha' <<< "$ref")
+            test "$(gh api "repos/$repo/git/tags/$object" --jq '.object.sha')" = "$expected"
+          }
+          for tag in v0.1.3 v0.1.4 v0.1.5 v0.1.6 v0.1.7 v0.1.8 v0.1.9; do
+            expected=$(jq -r --arg tag "$tag" '.predecessor_chain[]|select(.tag==$tag)|.target_commit_sha' "$contract")
+            verify_tag_target "$tag" "$expected"
+          done
+          verify_tag_target v0.2.0 c9f5de0b33fee1ca8546a627a8a94242b99c0733
+          if gh api "repos/$repo/releases/tags/v0.2.0" >/dev/null 2>&1; then
+            echo "v0.2.0 release unexpectedly exists" >&2
+            exit 1
+          fi
+          predecessor=$(gh api "repos/$repo/releases/379957493")
+          jq -e '.id==379957493 and .tag_name=="v0.1.3" and .draft==false and .immutable==true and (.assets|length)==0' <<< "$predecessor" >/dev/null
+          predecessor=$(gh api "repos/$repo/releases/380007644")
+          jq -e '.id==380007644 and .tag_name=="v0.1.8" and .draft==true and .immutable==false and (.assets|length)==0' <<< "$predecessor" >/dev/null
+          predecessor=$(gh api "repos/$repo/releases/380009987")
+          jq -e '.id==380009987 and .tag_name=="v0.1.9" and .draft==false and .immutable==true and (.assets|length)==4' <<< "$predecessor" >/dev/null
+          for tag in v0.1.4 v0.1.5 v0.1.6 v0.1.7; do
+            if gh api "repos/$repo/releases/tags/$tag" >/dev/null 2>&1; then
+              echo "$tag release unexpectedly exists" >&2
+              exit 1
+            fi
+          done
+
+          release_json=$(gh api "repos/$repo/releases/tags/$TAG" 2>/dev/null || true)
+          if ! jq -e --arg tag "$TAG" '.tag_name==$tag' <<< "$release_json" >/dev/null 2>&1; then
+            release_json=$(gh api --method POST "repos/$repo/releases" -f tag_name="$TAG" -f name="v0.2.1 — generated OpenTofu service project" -f body="Durable tag-bound evidence for the Gooo source, semantic graph, generated OpenTofu project, service contract, pinned validate -json, and relation evidence path. Scope is GENERATED_OPENTOFU_SERVICE_PROJECT_ONLY; utility remains UNKNOWN." -F draft=true -F prerelease=false)
+          fi
+          release_id=$(jq -r '.id' <<< "$release_json")
+          test "$(jq -r '.tag_name' <<< "$release_json")" = "$TAG"
+          test "$(jq -r '.draft' <<< "$release_json")" = true
+          test "$(gh api "repos/$repo/releases/$release_id/assets?per_page=100" | jq 'length')" = 0
+          printf '%s\n' "$release_id" > "$WORK_DIR/release-id"
+
+          jq -S -n --arg repo "$repo" --arg tag "$TAG" --arg commit "$tag_commit" --arg release_id "$release_id" --arg source_sha "$source_sha" --arg run_id "$main_run_id" --arg run_url "https://github.com/$repo/actions/runs/$main_run_id" --arg artifact_id "$artifact_id" --arg artifact_name "$artifact_name" --arg artifact_digest "$artifact_digest" --slurpfile c "$contract" --slurpfile o "$WORK_DIR/main-ci/observation.json" --slurpfile v "$WORK_DIR/main-ci/consumer-verification.json" '
+            ($c[0]) as $contract | ($o[0]) as $observation | ($v[0]) as $consumer |
+            {schema:"gooo/opentofu-envelope/release-manifest/v2",version:2,
+             release:{id:($release_id|tonumber),tag:$tag,commit_sha:$commit,url:("https://github.com/"+$repo+"/releases/tag/"+$tag),immutable_expected:true,asset_count_before:0,asset_count_after:4,required_assets:$contract.release.required_assets,predecessor_chain:$contract.predecessor_chain},
+             source_identity:{tag_commit_sha:$commit,source_sha256:$source_sha,main_ci_head_sha:$commit,main_ci_observation_source_sha:$observation.source.sha256,service_contract_source_sha:$source_sha,all_checks:true},
+             main_ci:{run_id:($run_id|tonumber),url:$run_url,artifact_id:($artifact_id|tonumber),artifact_name:$artifact_name,artifact_digest:$artifact_digest,observation_sha256:null,consumer_sha256:null},
+             workflow:$contract.workflow,pipeline:{evidence_source:$contract.pipeline.evidence_source,semantic_path:$contract.pipeline.semantic_path,release_local_execution_count:0,post_bootstrap_direct_main_mutations:0},toolchain:$contract.toolchain,
+             authority:{scope:$contract.authority.scope,semantic_graph_state:$observation.authority.semantic_graph_state,external_utility:$observation.utility,global_core_authority_claim:$observation.authority.global_core_authority_claim,handwritten_go_physical_files:$observation.authority.handwritten_go_physical_files,mutation_counts:{repository_writes:$observation.authority.repository_writes,network:$observation.authority.network,provider_install:$observation.authority.opentofu.provider_install,infrastructure:$observation.authority.infrastructure_mutations,state:$observation.authority.state_mutations,external_mutations:$observation.authority.external_mutations}},
+             project:$observation.project,cases:$observation.cases,generated_outputs:$observation.generated_outputs,service_contract:$observation.service_contract,relation_evidence:$observation.relation_evidence,validation:$observation.validation,receipt:$observation.receipt,
+             consumer:{path:$observation.consumer.path,sha256:null,state:$consumer.state,relation_counts:$consumer.relation_counts,digest_chain:$consumer.digest_chain},replay:$observation.replay,test_counts:$observation.test_counts,metrics:$observation.metrics,
+             inventory:{regular_files:$observation.inventory.regular_file_count,subfolders:$observation.inventory.descendant_directory_count,go_physical_files:$observation.inventory.go_physical_files,go_physical_lines:$observation.inventory.go_physical_lines,gooo_physical_files:$observation.inventory.gooo_physical_files,gooo_physical_lines:$observation.inventory.gooo_physical_lines,root_readme_excluded:$observation.inventory.root_readme_excluded},
+             improvement:$observation.improvement,utility:$observation.utility,denominator:$observation.denominator,checksum_contract:$contract.checksum_contract}
+          ' > "$WORK_DIR/manifest-v0.2.1.json"
+          observation_sha=$(sha256sum "$WORK_DIR/main-ci/observation.json" | awk '{print $1}')
+          consumer_sha=$(sha256sum "$WORK_DIR/main-ci/consumer-verification.json" | awk '{print $1}')
+          jq --arg observation_sha "$observation_sha" --arg consumer_sha "$consumer_sha" '.main_ci.observation_sha256=$observation_sha|.main_ci.consumer_sha256=$consumer_sha|.consumer.sha256=$consumer_sha' "$WORK_DIR/manifest-v0.2.1.json" > "$WORK_DIR/manifest-v0.2.1.json.tmp"
+          mv "$WORK_DIR/manifest-v0.2.1.json.tmp" "$WORK_DIR/manifest-v0.2.1.json"
+
+      - name: Create exactly four release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf "$WORK_DIR/assets/evidence-v0.2.1.tar.gz" -C "$WORK_DIR/main-ci" .
+          git archive --format=tar.gz --prefix="gooo-opentofu-envelope-v0.2.1/" "$TAG" -- README.md examples/intent/main.gooo contracts/project-envelope-v2.json contracts/release-lock-v1.json contracts/release-manifest-v0.2.0.json contracts/release-manifest-v0.2.1.json scripts/project_envelope.py scripts/project_consumer.py .github/workflows/envelope.yml .github/workflows/release-v0.2.1.yml > "$WORK_DIR/assets/source-v0.2.1.tar.gz"
+          cp "$WORK_DIR/manifest-v0.2.1.json" "$WORK_DIR/assets/manifest-v0.2.1.json"
+          (cd "$WORK_DIR/assets" && sha256sum evidence-v0.2.1.tar.gz manifest-v0.2.1.json source-v0.2.1.tar.gz > SHA256SUMS)
+          test "$(find "$WORK_DIR/assets" -maxdepth 1 -type f | wc -l | tr -d ' ')" = 4
+
+      - name: Upload and finalize immutable release
+        shell: bash
+        run: |
+          set -euo pipefail
+          repo="$GITHUB_REPOSITORY"
+          release_id=$(cat "$WORK_DIR/release-id")
+          for asset in evidence-v0.2.1.tar.gz manifest-v0.2.1.json SHA256SUMS source-v0.2.1.tar.gz; do
+            curl --fail --silent --show-error -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json" -H "Content-Type: application/octet-stream" --data-binary "@$WORK_DIR/assets/$asset" "https://uploads.github.com/repos/$repo/releases/$release_id/assets?name=$asset" > "$WORK_DIR/upload-$asset.json"
+          done
+          gh api --method PATCH "repos/$repo/releases/$release_id" -F draft=false -F prerelease=false > "$WORK_DIR/final-release.json"
+          jq -e --arg tag "$TAG" --argjson id "$release_id" '.tag_name==$tag and .id==$id and .draft==false and .prerelease==false and .immutable==true and (.assets|length)==4' "$WORK_DIR/final-release.json" >/dev/null
+          final_assets=$(gh api "repos/$repo/releases/$release_id/assets?per_page=100")
+          for asset in evidence-v0.2.1.tar.gz manifest-v0.2.1.json SHA256SUMS source-v0.2.1.tar.gz; do
+            local_file="$WORK_DIR/assets/$asset"
+            server_size=$(jq -r --arg name "$asset" '.[]|select(.name==$name)|.size' <<< "$final_assets")
+            server_digest=$(jq -r --arg name "$asset" '.[]|select(.name==$name)|.digest' <<< "$final_assets")
+            test "$server_size" = "$(wc -c < "$local_file" | tr -d ' ')"
+            test "$server_digest" = "sha256:$(sha256sum "$local_file" | awk '{print $1}')"
+            asset_id=$(jq -r --arg name "$asset" '.[]|select(.name==$name)|.id' <<< "$final_assets")
+            gh api -H 'Accept: application/octet-stream' "repos/$repo/releases/assets/$asset_id" > "$WORK_DIR/download-$asset"
+            test "$(sha256sum "$WORK_DIR/download-$asset" | awk '{print $1}')" = "$(sha256sum "$local_file" | awk '{print $1}')"
+          done
+
+      - name: Summarize immutable release
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq '{id,tag_name,target_commitish,immutable,assets:[.assets[]|{name,size,digest}]}' "$WORK_DIR/final-release.json"
+

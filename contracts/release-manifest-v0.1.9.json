@@ -2,17 +2,9 @@
   "schema": "gooo/opentofu-envelope/release-manifest/v1",
   "version": 1,
   "release": {
-    "tag": "v0.1.8",
-    "release_id": 380007644,
-    "release_present": true,
-    "draft": true,
-    "immutable": false,
-    "failed_trigger_counterexample": true,
-    "tag_object_sha": "79a59ed5edb82a0d7d234525f897207ed3a59247",
-    "target_commit_sha": "4d04baa3dc0157a27f4fca2c3f4e3a9f929953c9",
-    "failed_trigger_run_ids": [33432034362],
+    "tag": "v0.1.9",
     "asset_count_before": 0,
-    "asset_count_after": 0,
+    "asset_count_after": 4,
     "predecessor_chain": [
       {
         "tag": "v0.1.3",
@@ -60,19 +52,31 @@
         "tag_object_sha": "1c3a06733538dc5f4ae3ec143c838984615e68d1",
         "target_commit_sha": "a1682d56ec5d5c6ce5aaf1263a157a981d0e7e79",
         "failed_trigger_run_ids": [33431644645]
+      },
+      {
+        "tag": "v0.1.8",
+        "release_id": 380007644,
+        "release_present": true,
+        "draft": true,
+        "immutable": false,
+        "asset_count": 0,
+        "failed_trigger_counterexample": true,
+        "tag_object_sha": "79a59ed5edb82a0d7d234525f897207ed3a59247",
+        "target_commit_sha": "4d04baa3dc0157a27f4fca2c3f4e3a9f929953c9",
+        "failed_trigger_run_ids": [33432034362]
       }
     ]
   },
   "required_assets": [
-    "evidence-v0.1.8.tar.gz",
-    "manifest-v0.1.8.json",
+    "evidence-v0.1.9.tar.gz",
+    "manifest-v0.1.9.json",
     "SHA256SUMS",
-    "source-v0.1.8.tar.gz"
+    "source-v0.1.9.tar.gz"
   ],
   "workflow": {
-    "path": ".github/workflows/release-v0.1.8.yml",
+    "path": ".github/workflows/release-v0.1.9.yml",
     "trigger_event": "push",
-    "trigger_tags": ["v0.1.8"],
+    "trigger_tags": ["v0.1.9"],
     "workflow_dispatch": false
   },
   "source_identity": {
@@ -102,9 +106,9 @@
   },
   "checksum_contract": {
     "sha256sums_lists": [
-      "evidence-v0.1.8.tar.gz",
-      "manifest-v0.1.8.json",
-      "source-v0.1.8.tar.gz"
+      "evidence-v0.1.9.tar.gz",
+      "manifest-v0.1.9.json",
+      "source-v0.1.9.tar.gz"
     ],
     "sha256sums_excludes_self": true,
     "server_asset_digest_and_download_digest_must_match": true

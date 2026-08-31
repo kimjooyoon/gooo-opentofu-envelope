@@ -1,0 +1,265 @@
+name: Gooo OpenTofu Envelope v0.1.4 Release
+
+on:
+  push:
+    tags:
+      - v0.1.4
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: v0.1.4
+      WORK_DIR: ${{ runner.temp }}/gooo-opentofu-envelope-v0.1.4
+
+    steps:
+      - name: Checkout the annotated release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve the tagged source and successful main CI evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$WORK_DIR"
+          mkdir -p "$WORK_DIR/main-ci" "$WORK_DIR/downloads"
+
+          contract=contracts/release-manifest-v1.json
+          jq -e '
+            .schema=="gooo/opentofu-envelope/release-manifest/v1" and
+            .version==1 and
+            .release.tag=="v0.1.4" and
+            .release.asset_count_before==0 and
+            .release.asset_count_after==4 and
+            .release.predecessor.tag=="v0.1.3" and
+            .release.predecessor.release_id==379957493 and
+            .release.predecessor.asset_count==0 and
+            .release.predecessor.must_remain_unchanged==true and
+            .required_assets==["evidence-v0.1.4.tar.gz","manifest-v0.1.4.json","SHA256SUMS","source-v0.1.4.tar.gz"] and
+            .source_identity.tag_must_be_annotated==true and
+            .source_identity.tag_target_must_equal_merge_commit==true and
+            .source_identity.main_ci_head_sha_must_equal_tag_target==true and
+            .source_identity.main_ci_observation_source_sha_must_equal_tag_source_sha==true and
+            .pipeline.evidence_source=="SUCCESSFUL_MAIN_CI_ARTIFACT" and
+            .pipeline.semantic_path==["RELEASED_GOOO_GRAPH","main.tf.json","PINNED_OPENTOFU_VALIDATE_JSON","INDEPENDENT_SERVICE_ORACLE"] and
+            .pipeline.local_execution_in_release_workflow==0 and
+            .toolchain.go=="1.27.x" and
+            .authority.semantic_graph_state=="CLOSED" and
+            .authority.semantic_graph_scope=="GOOO_SEMANTIC_GRAPH_ONLY" and
+            .authority.external_utility_state=="UNKNOWN" and
+            .authority.global_core_authority_claim=="NOT_MADE" and
+            .checksum_contract.sha256sums_excludes_self==true and
+            .checksum_contract.server_asset_digest_and_download_digest_must_match==true
+          ' "$contract" >/dev/null
+
+          test "$(git cat-file -t "$TAG")" = tag
+          tag_commit=$(git rev-parse "${TAG}^{commit}")
+          test "$tag_commit" = "$(git rev-parse HEAD)"
+          source_sha=$(sha256sum examples/intent/main.gooo | awk '{print $1}')
+          printf '%s\n' "$tag_commit" > "$WORK_DIR/tag-commit"
+          printf '%s\n' "$source_sha" > "$WORK_DIR/source-sha"
+
+          artifact_name="gooo-opentofu-envelope-evidence-$tag_commit"
+          runs_json=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$tag_commit&event=push&per_page=100" | jq -s 'map(.workflow_runs) | add')
+          main_run=$(jq -c --arg name "Gooo OpenTofu Envelope" --arg sha "$tag_commit" '
+            map(select(.name==$name and .head_sha==$sha and .status=="completed" and .conclusion=="success")) | sort_by(.run_number) | last
+          ' <<< "$runs_json")
+          test "$main_run" != null
+          main_run_id=$(jq -r '.id' <<< "$main_run")
+          test -n "$main_run_id"
+
+          artifacts_json=$(gh api --paginate "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$artifact_name&per_page=100" | jq -s 'map(.artifacts) | add')
+          main_artifact=$(jq -c --arg name "$artifact_name" --arg run_id "$main_run_id" --arg sha "$tag_commit" '
+            map(select(.name==$name and .expired==false and (.workflow_run.id|tostring)==$run_id and .workflow_run.head_sha==$sha)) | sort_by(.created_at) | last
+          ' <<< "$artifacts_json")
+          test "$main_artifact" != null
+          artifact_id=$(jq -r '.id' <<< "$main_artifact")
+          artifact_digest=$(jq -r '.digest' <<< "$main_artifact")
+          test -n "$artifact_id"
+          test "$artifact_digest" != null
+
+          gh api -H 'Accept: application/zip' "repos/$GITHUB_REPOSITORY/actions/artifacts/$artifact_id/zip" > "$WORK_DIR/main-ci-artifact.zip"
+          unzip -q "$WORK_DIR/main-ci-artifact.zip" -d "$WORK_DIR/main-ci"
+          test -f "$WORK_DIR/main-ci/observation.json"
+
+          jq -e --arg source_sha "$source_sha" '
+            .schema=="gooo/opentofu-envelope/observation/v2" and
+            .state=="CLOSED" and
+            .subject.source_sha256==$source_sha and
+            .semantic_authority.state=="CLOSED" and
+            .semantic_authority.source=="GOOO_SOURCE_AUTHORITATIVE" and
+            .semantic_authority.ir=="GOOO_SEMANTIC_IR_AUTHORITATIVE" and
+            .semantic_authority.graph=="DERIVED_FROM_RELEASED_IR" and
+            .toolchain.go_requirement=="1.27.x" and
+            .test_counts=={total:9,executed:9,reused:0,skipped:0,not_observed:0} and
+            .cases.case_count==9 and
+            .cases.outcome_counts=={CLOSED:3,UNKNOWN:3,REFUTED:3} and
+            .cases.state_precedence==["REFUTED","UNKNOWN","CLOSED"] and
+            .utility.state=="UNKNOWN" and
+            .authority.repository_writes==0 and
+            .authority.local_test_executions==0 and
+            .authority.local_build_executions==0 and
+            .authority.opentofu_init_executions==0 and
+            .authority.opentofu_validate_executions==1 and
+            .authority.opentofu_plan_executions==0 and
+            .authority.opentofu_apply_executions==0 and
+            .authority.opentofu_destroy_executions==0 and
+            .authority.opentofu_state_mutations==0 and
+            .authority.opentofu_provider_accesses==0 and
+            .authority.opentofu_runtime_network_access_claimed==false and
+            .authority.opentofu_runtime_network_access_observed==false and
+            .mutation_counts=={repository_writes:0,network:0,provider_install:0,infrastructure:0,state:0,external_mutations:0} and
+            .replay.state=="CLOSED" and
+            .replay.comparison_count==2 and
+            (.replay.comparisons|all(.[]; .byte_equal==true)) and
+            (.generated_outputs.files|sort)==["contract-receipt.json","dossier.md","main.tf.json"] and
+            .identity.source_sha256==$source_sha
+          ' "$WORK_DIR/main-ci/observation.json" >/dev/null
+
+          predecessor=$(gh api "repos/$GITHUB_REPOSITORY/releases/379957493")
+          jq -e '
+            .id==379957493 and .tag_name=="v0.1.3" and .immutable==true and
+            .draft==false and .prerelease==false and (.assets|length)==0
+          ' <<< "$predecessor" >/dev/null
+
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/tags/$TAG" 2>/dev/null || true)
+          if [ -z "$release_json" ]; then
+            release_json=$(gh api --method POST "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$TAG" \
+              -f name="v0.1.4 — durable semantic authority evidence" \
+              -f body="Durable tag-bound evidence for the read-only Gooo semantic graph -> main.tf.json -> pinned OpenTofu validate -json -> independent oracle path. v0.1.3 remains the preserved predecessor counterexample with zero release assets." \
+              -F draft=true -F prerelease=false)
+          fi
+          release_id=$(jq -r '.id' <<< "$release_json")
+          test -n "$release_id"
+          test "$(jq -r '.tag_name' <<< "$release_json")" = "$TAG"
+          test "$(jq -r '.draft' <<< "$release_json")" = true
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" | jq 'length')" = 0
+          printf '%s\n' "$release_id" > "$WORK_DIR/release-id"
+
+          jq -S -n \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --arg tag "$TAG" \
+            --arg commit "$tag_commit" \
+            --arg release_id "$release_id" \
+            --arg source_sha "$source_sha" \
+            --arg run_id "$main_run_id" \
+            --arg run_url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$main_run_id" \
+            --arg artifact_id "$artifact_id" \
+            --arg artifact_name "$artifact_name" \
+            --arg artifact_digest "$artifact_digest" \
+            --slurpfile observation "$WORK_DIR/main-ci/observation.json" \
+            --slurpfile denominator contracts/envelope-v1.json \
+            '($observation[0]) as $o |
+            {
+              schema:"gooo/opentofu-envelope/release-manifest/v1",
+              version:1,
+              release:{id:($release_id|tonumber),tag:$tag,commit_sha:$commit,url:("https://github.com/" + $repo + "/releases/tag/" + $tag),immutable_expected:true,asset_count_before:0,asset_count_after:4,predecessor:{tag:"v0.1.3",release_id:379957493,asset_count:0,must_remain_unchanged:true}},
+              asset_count_before:0,
+              asset_count_after:4,
+              required_assets:["evidence-v0.1.4.tar.gz","manifest-v0.1.4.json","SHA256SUMS","source-v0.1.4.tar.gz"],
+              source_identity:{tag:$tag,tag_commit_sha:$commit,source_sha256:$source_sha,main_ci_head_sha:$commit,main_ci_observation_source_sha:$o.subject.source_sha256},
+              main_ci:{run_id:($run_id|tonumber),url:$run_url,artifact_id:($artifact_id|tonumber),artifact_name:$artifact_name,artifact_digest:$artifact_digest,observation_sha256:null},
+              pipeline:{evidence_source:"SUCCESSFUL_MAIN_CI_ARTIFACT",semantic_path:["RELEASED_GOOO_GRAPH","main.tf.json","PINNED_OPENTOFU_VALIDATE_JSON","INDEPENDENT_SERVICE_ORACLE"],reproduced_without_local_execution:true},
+              toolchain:{go_requirement:$o.toolchain.go_requirement,go_version_evidence:$o.toolchain.go_version_evidence},
+              denominator:{target_cells:12,expected_user_path_steps:5,binding_edges:14,proof_counts:{FOUNDATION:4,COHERENCE:4,REGRESSION:4},indicator_counts:{DRIVER:4,OUTCOME:4,GUARDRAIL:4},contract:$denominator[0]},
+              cases:$o.cases,
+              metrics:{count:($o.metrics|length),values:$o.metrics,primary_count:($o.primary_metrics|length),primary_values:$o.primary_metrics},
+              authority:{semantic_graph_authority:{state:"CLOSED",scope:"GOOO_SEMANTIC_GRAPH_ONLY",evidence:$o.semantic_authority},external_utility:$o.utility,global_core_authority_claim:"NOT_MADE",mutation_counts:$o.mutation_counts,authority:$o.authority,reuse_contract:$o.reuse_contract,test_counts:$o.test_counts},
+              observations:{subject:$o.subject,semantic_oracle_match:$o.semantic_oracle_match,validation:$o.validation,contract_receipt:$o.contract_receipt,replay:$o.replay,generated_outputs:$o.generated_outputs,repository_inventory:$o.repository_inventory},
+              identity:$o.identity,
+              checksum_contract:{sha256sums_lists:["evidence-v0.1.4.tar.gz","manifest-v0.1.4.json","source-v0.1.4.tar.gz"],sha256sums_excludes_self:true,server_asset_digest_and_download_digest_must_match:true}
+            }' > "$WORK_DIR/manifest-v0.1.4.json"
+
+          observation_sha=$(sha256sum "$WORK_DIR/main-ci/observation.json" | awk '{print $1}')
+          jq --arg sha "$observation_sha" '.main_ci.observation_sha256=$sha' "$WORK_DIR/manifest-v0.1.4.json" > "$WORK_DIR/manifest-v0.1.4.json.tmp"
+          mv "$WORK_DIR/manifest-v0.1.4.json.tmp" "$WORK_DIR/manifest-v0.1.4.json"
+
+      - name: Create the four caller-owned temporary release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_commit=$(cat "$WORK_DIR/tag-commit")
+          mkdir -p "$WORK_DIR/evidence-package"
+          cp -R "$WORK_DIR/main-ci/." "$WORK_DIR/evidence-package/"
+          tar --sort=name --mtime='UTC 1970-01-01' --owner=0 --group=0 --numeric-owner -czf "$WORK_DIR/evidence-v0.1.4.tar.gz" -C "$WORK_DIR/evidence-package" .
+          git archive --format=tar.gz --prefix="gooo-opentofu-envelope-v0.1.4/" "$tag_commit" > "$WORK_DIR/source-v0.1.4.tar.gz"
+          {
+            sha256sum "$WORK_DIR/evidence-v0.1.4.tar.gz"
+            sha256sum "$WORK_DIR/manifest-v0.1.4.json"
+            sha256sum "$WORK_DIR/source-v0.1.4.tar.gz"
+          } | sed "s#  $WORK_DIR/#  #" > "$WORK_DIR/SHA256SUMS"
+          for asset in evidence-v0.1.4.tar.gz manifest-v0.1.4.json SHA256SUMS source-v0.1.4.tar.gz; do
+            test -s "$WORK_DIR/$asset"
+          done
+          jq -e --arg commit "$tag_commit" --arg tag "$TAG" '
+            .schema=="gooo/opentofu-envelope/release-manifest/v1" and
+            .release.tag==$tag and .release.commit_sha==$commit and
+            .asset_count_before==0 and .asset_count_after==4 and
+            (.required_assets|length)==4 and
+            .denominator.target_cells==12 and
+            .cases.case_count==9 and
+            .metrics.count==25 and
+            .authority.semantic_graph_authority.state=="CLOSED" and
+            .authority.semantic_graph_authority.scope=="GOOO_SEMANTIC_GRAPH_ONLY" and
+            .authority.external_utility.state=="UNKNOWN" and
+            .authority.global_core_authority_claim=="NOT_MADE"
+          ' "$WORK_DIR/manifest-v0.1.4.json" >/dev/null
+
+      - name: Upload exactly four assets to the draft release
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_id=$(cat "$WORK_DIR/release-id")
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")
+          test "$(jq -r '.tag_name' <<< "$release_json")" = "$TAG"
+          test "$(jq -r '.draft' <<< "$release_json")" = true
+          for asset in evidence-v0.1.4.tar.gz manifest-v0.1.4.json SHA256SUMS source-v0.1.4.tar.gz; do
+            gh api --method POST \
+              -H 'Content-Type: application/octet-stream' \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?name=$asset" \
+              --input "$WORK_DIR/$asset" >/dev/null
+          done
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100" | jq 'length')" = 4
+
+      - name: Publish and verify immutable release asset identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_id=$(cat "$WORK_DIR/release-id")
+          gh api --method PATCH "repos/$GITHUB_REPOSITORY/releases/$release_id" -F draft=false >/dev/null
+          release_json=$(gh api "repos/$GITHUB_REPOSITORY/releases/$release_id")
+          jq -e --arg tag "$TAG" '
+            .tag_name==$tag and .draft==false and .prerelease==false and .immutable==true and
+            (.assets|length)==4 and
+            ([.assets[].name]|sort)==["SHA256SUMS","evidence-v0.1.4.tar.gz","manifest-v0.1.4.json","source-v0.1.4.tar.gz"]
+          ' <<< "$release_json" >/dev/null
+
+          assets_json=$(gh api --paginate "repos/$GITHUB_REPOSITORY/releases/$release_id/assets?per_page=100")
+          verified_assets='[]'
+          for asset in evidence-v0.1.4.tar.gz manifest-v0.1.4.json SHA256SUMS source-v0.1.4.tar.gz; do
+            local_size=$(wc -c < "$WORK_DIR/$asset" | tr -d ' ')
+            local_sha=$(sha256sum "$WORK_DIR/$asset" | awk '{print $1}')
+            asset_json=$(jq -c --arg name "$asset" 'map(select(.name==$name)) | if length==1 then .[0] else error("asset missing or duplicated") end' <<< "$assets_json")
+            asset_id=$(jq -r '.id' <<< "$asset_json")
+            test "$(jq -r '.size' <<< "$asset_json")" = "$local_size"
+            test "$(jq -r '.digest' <<< "$asset_json")" = "sha256:$local_sha"
+            gh api -H 'Accept: application/octet-stream' "repos/$GITHUB_REPOSITORY/releases/assets/$asset_id" > "$WORK_DIR/downloads/$asset"
+            test "$(wc -c < "$WORK_DIR/downloads/$asset" | tr -d ' ')" = "$local_size"
+            test "$(sha256sum "$WORK_DIR/downloads/$asset" | awk '{print $1}')" = "$local_sha"
+            downloaded_sha=$(sha256sum "$WORK_DIR/downloads/$asset" | awk '{print $1}')
+            verified_assets=$(jq --argjson asset "$asset_json" --arg downloaded "sha256:$downloaded_sha" \
+              '. + [($asset | {id,name,size,digest}) + {downloaded_digest:$downloaded,downloaded_digest_verified:true}]' <<< "$verified_assets")
+          done
+
+          jq -S -n --argjson release "$release_json" --argjson assets "$verified_assets" \
+            '{schema:"gooo/opentofu-envelope/release-verification/v1",release:{id:$release.id,tag:$release.tag_name,url:$release.html_url,immutable:$release.immutable,asset_count:($release.assets|length)},assets:$assets}' \
+            > "$WORK_DIR/release-verification.json"
+          cat "$WORK_DIR/release-verification.json" >> "$GITHUB_STEP_SUMMARY"

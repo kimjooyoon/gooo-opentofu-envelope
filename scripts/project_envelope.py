@@ -435,7 +435,7 @@ def validate(tofu_json_path: Path, artifact_path: Path, service_contract_path: P
     tofu = read_json(tofu_json_path)
     artifact = read_json(artifact_path)
     contract_doc = read_json(service_contract_path)
-    resources = tofu.get("resource", {}).get("terraform_data", {})
+    resources = artifact.get("resource", {}).get("terraform_data", {})
     expected_resources = {"project", "endpoint_health", "endpoint_orders"}
     checks = {
         "tofu_valid": tofu.get("valid") is True, "tofu_errors": tofu.get("errors", 0) == 0, "tofu_warnings": tofu.get("warnings", 0) == 0,
